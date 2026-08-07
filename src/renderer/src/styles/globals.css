@@ -1,0 +1,213 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light — the default look: clean, high contrast, low chrome. */
+    --background: 220 20% 98%;
+    --foreground: 222 40% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 40% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 40% 11%;
+
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 16% 95%;
+    --secondary-foreground: 222 30% 20%;
+
+    --muted: 220 16% 95%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 243 75% 96%;
+    --accent-foreground: 243 75% 40%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 60% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 205 85% 45%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 220 15% 89%;
+    --input: 220 15% 87%;
+    --ring: 243 75% 59%;
+
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 222 25% 30%;
+    --sidebar-accent: 243 75% 96%;
+    --sidebar-border: 220 15% 91%;
+
+    --chart-1: 243 75% 59%;
+    --chart-2: 152 60% 41%;
+    --chart-3: 32 95% 50%;
+    --chart-4: 205 85% 50%;
+    --chart-5: 330 70% 55%;
+    --chart-6: 265 70% 60%;
+
+    --radius: 0.65rem;
+  }
+
+  .dark {
+    --background: 224 32% 7%;
+    --foreground: 210 20% 96%;
+
+    --card: 224 26% 10%;
+    --card-foreground: 210 20% 96%;
+
+    --popover: 224 26% 11%;
+    --popover-foreground: 210 20% 96%;
+
+    --primary: 243 80% 68%;
+    --primary-foreground: 224 40% 10%;
+
+    --secondary: 223 20% 17%;
+    --secondary-foreground: 210 20% 92%;
+
+    --muted: 223 20% 16%;
+    --muted-foreground: 218 12% 63%;
+
+    --accent: 243 40% 22%;
+    --accent-foreground: 243 90% 85%;
+
+    --destructive: 0 65% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 55% 45%;
+    --success-foreground: 224 40% 10%;
+
+    --warning: 35 90% 55%;
+    --warning-foreground: 224 40% 10%;
+
+    --info: 205 80% 58%;
+    --info-foreground: 224 40% 10%;
+
+    --border: 223 18% 20%;
+    --input: 223 18% 24%;
+    --ring: 243 80% 68%;
+
+    --sidebar: 224 28% 9%;
+    --sidebar-foreground: 215 16% 72%;
+    --sidebar-accent: 243 40% 20%;
+    --sidebar-border: 223 18% 18%;
+
+    --chart-1: 243 80% 70%;
+    --chart-2: 152 55% 50%;
+    --chart-3: 35 90% 58%;
+    --chart-4: 205 80% 60%;
+    --chart-5: 330 70% 65%;
+    --chart-6: 265 70% 70%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* Numbers should line up in every table. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+    background-clip: content-box;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer components {
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  .kbd {
+    @apply inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-border
+           bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground shadow-sm;
+  }
+
+  .card-surface {
+    @apply rounded-xl border border-border bg-card shadow-soft;
+  }
+
+  .table-row-hover {
+    @apply transition-colors hover:bg-muted/60;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-muted;
+  }
+  .skeleton::after {
+    @apply absolute inset-0 -translate-x-full;
+    content: '';
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--background) / 0.6),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
+  }
+
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+/* Print — invoices only, no app chrome. */
+@media print {
+  body {
+    overflow: visible;
+    background: #fff;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

@@ -1,0 +1,70 @@
+appId: in.krishnamobile.desktop
+productName: Krishna Mobile
+copyright: Copyright © 2026 Krishna Mobile
+
+directories:
+  buildResources: build
+  output: release/${version}
+
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintrc,.eslintignore,.prettierrc,.prettierignore,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml,package-lock.json}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,tailwind.config.js,postcss.config.js}'
+
+# The bundled .env ships INSIDE the installer so the shop owner never configures anything.
+extraResources:
+  - from: .env
+    to: .env
+    filter: ['**/*']
+
+asarUnpack:
+  - resources/**
+  - node_modules/@libsql/**
+  - node_modules/libsql/**
+
+win:
+  executableName: KrishnaMobile
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Krishna Mobile
+  deleteAppDataOnUninstall: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  uninstallDisplayName: Krishna Mobile ${version}
+  artifactName: ${productName}-Setup-${version}.${ext}
+  differentialPackage: true
+
+# ---------------------------------------------------------------------------
+# AUTO-UPDATE FEED — GitHub Releases
+# ---------------------------------------------------------------------------
+# `npm run publish:win` uploads latest.yml + the .exe + .blockmap to a release.
+# Installed copies then update themselves straight from GitHub.
+#
+# The release must be public for auto-update to work without a token.
+# To serve updates from your own host instead, replace this block with:
+#   publish:
+#     - provider: generic
+#       url: https://your-host/krishna-mobile/win
+# and set UPDATE_FEED_URL in .env to the same address.
+publish:
+  - provider: github
+    owner: Jaydeepsaha2003
+    repo: krishna-mobile
+    releaseType: release
+
+npmRebuild: false
+buildDependenciesFromSource: false

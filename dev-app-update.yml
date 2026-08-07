@@ -1,0 +1,4 @@
+provider: github
+owner: Jaydeepsaha2003
+repo: krishna-mobile
+updaterCacheDirName: krishna-mobile-updater
