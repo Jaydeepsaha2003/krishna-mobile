@@ -184,6 +184,14 @@ export function buildInvoiceHtml({ sale, raw, items, payments }: InvoicePayload)
     </div>
   </div>
 
+  ${
+    sale.saleType && sale.saleType !== 'product'
+      ? `<div class="box"><h3>${sale.saleType === 'repair' ? 'Repair details' : 'Recharge'}</h3>
+         ${sale.serviceTitle ? `<div class="b">${esc(sale.serviceTitle)}</div>` : ''}
+         ${sale.serviceDetails ? `<div class="s">${esc(sale.serviceDetails)}</div>` : ''}</div>`
+      : ''
+  }
+
   <table>
     <thead>
       <tr>

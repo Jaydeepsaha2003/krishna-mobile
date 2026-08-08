@@ -12,6 +12,9 @@ import * as parties from './services/parties'
 import * as inventory from './services/inventory'
 import * as sales from './services/sales'
 import * as recon from './services/reconciliation'
+import * as loans from './services/loans'
+import * as importAccess from './services/importAccess'
+import * as servicesCatalog from './services/servicesCatalog'
 import * as reports from './services/reports'
 import * as notifications from './services/notifications'
 import * as audit from './services/audit'
@@ -22,7 +25,7 @@ import {
   getUpdateState,
   installNow
 } from './updater'
-import { DEFAULT_RECON_REASONS, INDIAN_STATES } from '../shared/constants'
+import { DEFAULT_RECON_REASONS, FEATURES, INDIAN_STATES } from '../shared/constants'
 
 type Handler = (payload: any, event: Electron.IpcMainInvokeEvent) => unknown | Promise<unknown>
 
@@ -107,6 +110,8 @@ const handlers: Record<string, Handler> = {
   'stock:byImei': ({ imei }: any) => inventory.findByImei(imei),
   'stock:available': ({ shopId, search, limit }: any) =>
     inventory.availableStock(shopId, search, limit),
+  'stock:availableModels': ({ shopId, search, limit }: any) =>
+    inventory.availableModels(shopId, search, limit),
   'stock:summary': ({ shopId }: any = {}) => inventory.stockSummary(shopId),
   'stock:adjust': (input: any) => inventory.adjustStock(input),
   'stock:adjustments': (params: any = {}) => inventory.listAdjustments(params),
@@ -132,6 +137,11 @@ const handlers: Record<string, Handler> = {
   'sales:creditBook': (params: any = {}) => sales.creditBook(params),
   'purchases:recordPayment': (input: any) => sales.recordSupplierPayment(input),
 
+  /* ---------------------------------------------------------- services */
+  'services:list': (params: any = {}) => servicesCatalog.listServices(params),
+  'services:save': (input: any) => servicesCatalog.saveService(input),
+  'services:delete': ({ id }: any) => servicesCatalog.deleteServiceEntry(id),
+
   /* --------------------------------------------------------- reconciliation */
   'recon:preview': (params: any) => recon.computeExpected(params),
   'recon:create': (input: any) => recon.createReconciliation(input),
@@ -145,6 +155,41 @@ const handlers: Record<string, Handler> = {
   'recon:delete': ({ id }: any) => recon.deleteReconciliation(id),
   'recon:reasons': ({ includeInactive }: any = {}) => recon.listReasons(includeInactive),
   'recon:saveReason': (input: any) => recon.saveReason(input),
+
+  /* ------------------------------------------------------------- EMI loans */
+  'loans:create': (input: any) => loans.createLoan(input),
+  'loans:list': (filter: any = {}) => loans.listLoans(filter),
+  'loans:get': ({ id }: any) => loans.getLoan(id),
+  'loans:search': ({ search, onlyActive }: any = {}) => loans.searchLoans(search, onlyActive),
+  'loans:repay': (input: any) => loans.recordRepayment(input),
+  'loans:foreclose': (input: any) => loans.forecloseLoan(input),
+  'loans:cancel': ({ loanId, reason }: any) => loans.cancelLoan(loanId, reason),
+  'loans:analysis': (params: any) => loans.loanAnalysis(params),
+  'loans:analysisGrid': (params: any) => loans.loanAnalysisGrid(params),
+
+  /* ------------------------------------------------------- data import */
+  'import:pickAccessFile': async (_p, event) => {
+    if (!FEATURES.dataImport) throw new AppError('Data import is not available in this version.', 'LOCKED')
+    const win = BrowserWindow.fromWebContents(event.sender)!
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Select the old Access database',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Access database', extensions: ['accdb', 'mdb'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (canceled || !filePaths.length) return { filePath: null }
+    return { filePath: filePaths[0] }
+  },
+  'import:previewAccess': ({ filePath }: any) => {
+    if (!FEATURES.dataImport) throw new AppError('Data import is not available in this version.', 'LOCKED')
+    return importAccess.previewAccessImport({ filePath })
+  },
+  'import:runAccess': ({ filePath, shopId }: any) => {
+    if (!FEATURES.dataImport) throw new AppError('Data import is not available in this version.', 'LOCKED')
+    return importAccess.runAccessImport({ filePath, shopId })
+  },
 
   /* ---------------------------------------------------------------- reports */
   'reports:dashboard': (params: any = {}) => reports.dashboard(params),

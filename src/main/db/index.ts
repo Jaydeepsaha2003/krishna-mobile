@@ -55,42 +55,47 @@ export async function connect(): Promise<Client> {
   // Distinct files: a plain offline database and a Turso replica are not
   // interchangeable, and pointing the replica at a plain file fails hard.
   const offlineFile = join(dir, 'krishna-mobile.db')
-  const replicaFile = join(dir, 'krishna-replica.db')
+  // Local-first replica file. A NEW name (not the old `krishna-replica.db`) so
+  // the switch to offline-writes mode starts from a clean replica instead of
+  // trying to reuse a file created by the old write-through client.
+  const replicaFile = join(dir, 'krishna-replica-lf.db')
   const url = config.tursoUrl
   const token = config.tursoToken
 
   connectError = null
 
+  // Local-first: with `offline: true`, writes land in the local replica
+  // instantly (~0.5ms) instead of blocking on a round-trip to the Turso primary
+  // (~9s on a slow link, which froze the whole app). `sync()` — on connect, on
+  // the auto-sync interval, and on demand — pushes those local writes up and
+  // pulls other shops' changes down, so the two shops stay in step within the
+  // sync interval without any save ever waiting on the network.
+  const embeddedOpts = {
+    url: `file:${replicaFile}`,
+    syncUrl: url,
+    authToken: token || undefined,
+    offline: true,
+    intMode: 'number' as const
+  }
+
   if (url && config.useEmbeddedReplica) {
-    // Local SQLite copy kept in sync with Turso — reads stay fast and keep
-    // working when the shop's internet drops.
     mode = 'embedded'
     try {
-      client = createClient({
-        url: `file:${replicaFile}`,
-        syncUrl: url,
-        authToken: token || undefined,
-        intMode: 'number'
-      })
+      client = createClient(embeddedOpts)
     } catch (err: any) {
       // A half-written or mode-switched replica cannot be repaired in place.
       // Everything in it also lives in Turso, so rebuilding it is safe.
       log.warn(`[db] replica unusable (${err?.message}) — rebuilding from Turso`)
       wipeLocal(replicaFile)
       try {
-        client = createClient({
-          url: `file:${replicaFile}`,
-          syncUrl: url,
-          authToken: token || undefined,
-          intMode: 'number'
-        })
+        client = createClient(embeddedOpts)
       } catch (err2: any) {
         log.warn('[db] replica rebuild failed — falling back to a live connection', err2)
         mode = 'remote'
         client = createClient({ url, authToken: token || undefined, intMode: 'number' })
       }
     }
-    log.info(`[db] ${mode} — ${url}`)
+    log.info(`[db] ${mode} (local-first) — ${url}`)
   } else if (url) {
     mode = 'remote'
     client = createClient({ url, authToken: token || undefined, intMode: 'number' })
@@ -140,6 +145,21 @@ export function startAutoSync(): void {
   syncTimer = setInterval(() => void sync(), seconds * 1000)
 }
 
+/**
+ * Local-first writes only reach Turso (and the other shop) on the next sync.
+ * After a write we schedule a single debounced background sync so the
+ * durability / cross-shop window is a couple of seconds, not the full auto-sync
+ * interval — without ever making the write itself wait on the network.
+ */
+let pushTimer: NodeJS.Timeout | null = null
+export function schedulePush(delayMs = 2000): void {
+  if (mode !== 'embedded' || pushTimer) return
+  pushTimer = setTimeout(() => {
+    pushTimer = null
+    void sync()
+  }, delayMs)
+}
+
 export function stopAutoSync(): void {
   if (syncTimer) clearInterval(syncTimer)
   syncTimer = null
@@ -147,7 +167,11 @@ export function stopAutoSync(): void {
 
 export async function close(): Promise<void> {
   stopAutoSync()
-  await sync()
+  if (pushTimer) {
+    clearTimeout(pushTimer)
+    pushTimer = null
+  }
+  await sync() // flush any un-pushed local writes to Turso before exit
   client?.close()
   client = null
 }
@@ -186,7 +210,9 @@ export async function scalar<T = any>(sql: string, args: InArgs = []): Promise<T
 }
 
 export async function run(sql: string, args: InArgs = []): Promise<ResultSet> {
-  return getClient().execute({ sql, args })
+  const rs = await getClient().execute({ sql, args })
+  schedulePush()
+  return rs
 }
 
 export interface Stmt {
@@ -204,6 +230,7 @@ export async function batch(stmts: Stmt[]): Promise<void> {
     stmts.map((s) => ({ sql: s.sql, args: s.args ?? [] })),
     'write'
   )
+  schedulePush()
 }
 
 /**
@@ -227,6 +254,7 @@ export async function tx<T>(fn: (t: TxHandle) => Promise<T>): Promise<T> {
   try {
     const result = await fn(handle)
     await t.commit()
+    schedulePush()
     return result
   } catch (err) {
     try {

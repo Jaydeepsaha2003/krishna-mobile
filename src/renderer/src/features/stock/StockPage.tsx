@@ -32,7 +32,7 @@ export function StockPage() {
   const reasons = useReconReasons()
   const [params] = useSearchParams()
 
-  const [tab, setTab] = React.useState('units')
+  const [tab, setTab] = React.useState('models')
   const [search, setSearch] = React.useState(params.get('q') ?? '')
   const [scope, setScope] = React.useState(shopId ?? 'all')
   const [status, setStatus] = React.useState('in_stock')
@@ -83,8 +83,10 @@ export function StockPage() {
   })
 
   const rows = units.data?.rows ?? []
-  const totalUnits = units.data?.total ?? 0
-  const stockValue = rows.reduce((a: number, r: any) => a + Number(r.costPrice || 0), 0)
+  // Totals come from the grouped summary so they always reflect true in-stock
+  // counts/value (not just the first page of the units list).
+  const inStockTotal = (summary.data ?? []).reduce((a: number, s: any) => a + (s.qty || 0), 0)
+  const inStockValue = (summary.data ?? []).reduce((a: number, s: any) => a + Number(s.stockValue || 0), 0)
   const lowCount = (summary.data ?? []).filter((s: any) => s.isLow).length
 
   const toggle = (id: string) =>
@@ -101,7 +103,10 @@ export function StockPage() {
       toast.success('Stock adjusted and written to the audit trail')
       setAdjustFor(null)
       setAdjustNote('')
+      // Refresh every stock view so the grouped counts and totals drop immediately.
       void qc.invalidateQueries({ queryKey: ['stock'] })
+      void qc.invalidateQueries({ queryKey: ['stock-summary'] })
+      void qc.invalidateQueries({ queryKey: ['stock-ageing'] })
     } catch (err: any) {
       toast.error(err.message)
     }
@@ -149,8 +154,8 @@ export function StockPage() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Units shown" value={String(totalUnits)} icon={Boxes} tone="primary" />
-        <StatCard label="Value shown" value={money(stockValue)} icon={Boxes} />
+        <StatCard label="Total in stock" value={String(inStockTotal)} icon={Boxes} tone="primary" />
+        <StatCard label="Stock value" value={money(inStockValue)} icon={Boxes} />
         <StatCard
           label="Low-stock models"
           value={String(lowCount)}
@@ -206,8 +211,8 @@ export function StockPage() {
         <div className="flex-1" />
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
-            <TabsTrigger value="units">Units</TabsTrigger>
             <TabsTrigger value="models">By model</TabsTrigger>
+            <TabsTrigger value="units">Units</TabsTrigger>
             <TabsTrigger value="ageing">Ageing</TabsTrigger>
           </TabsList>
         </Tabs>

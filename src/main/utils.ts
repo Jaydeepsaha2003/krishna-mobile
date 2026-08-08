@@ -19,6 +19,24 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
+/** Adds calendar months to a yyyy-MM-dd date, clamping the day (31 Jan + 1mo -> 28/29 Feb). */
+export function addMonths(dateStr: string, months: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const total = m - 1 + months
+  const year = y + Math.floor(total / 12)
+  const month = ((total % 12) + 12) % 12
+  const lastDay = new Date(year, month + 1, 0).getDate()
+  const day = Math.min(d, lastDay)
+  return `${year}-${pad(month + 1)}-${pad(day)}`
+}
+
+/** Whole calendar days between two yyyy-MM-dd dates (to - from). */
+export function daysBetween(from: string, to: string): number {
+  const a = new Date(`${from}T00:00:00`)
+  const b = new Date(`${to}T00:00:00`)
+  return Math.round((b.getTime() - a.getTime()) / 86400000)
+}
+
 export function round2(n: number): number {
   return Math.round((Number(n) + Number.EPSILON) * 100) / 100
 }
@@ -52,7 +70,7 @@ export function financialYear(dateStr: string, startMonth = 4): string {
 export async function nextDocumentNumber(opts: {
   companyId: string
   shopId: string
-  kind: 'sale' | 'purchase' | 'transfer' | 'recon'
+  kind: 'sale' | 'purchase' | 'transfer' | 'recon' | 'loan'
   date: string
   prefix: string
   fyStartMonth?: number

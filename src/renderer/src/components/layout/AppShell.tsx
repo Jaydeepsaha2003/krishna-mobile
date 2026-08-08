@@ -6,6 +6,7 @@ import {
   ChevronsRight,
   Command,
   Keyboard,
+  Lock,
   LogOut,
   Moon,
   RefreshCw,
@@ -179,41 +180,73 @@ export function AppShell() {
                   </p>
                 )}
                 <div className="space-y-0.5">
-                  {items.map((item) => (
-                    <Tooltip
-                      key={item.to}
-                      content={collapsed ? item.label : ''}
-                      side="right"
-                      shortcut={collapsed && item.hotkey ? item.hotkey.toUpperCase() : undefined}
-                    >
-                      <NavLink
-                        to={item.to}
-                        end={item.end}
-                        className={({ isActive }) =>
-                          cn(
-                            `group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium
-                             text-sidebar-foreground transition-colors`,
-                            isActive
-                              ? 'bg-sidebar-accent text-accent-foreground shadow-sm'
-                              : 'hover:bg-sidebar-accent/60 hover:text-foreground',
-                            collapsed && 'justify-center px-0'
-                          )
-                        }
+                  {items.map((item) =>
+                    item.locked ? (
+                      <Tooltip
+                        key={item.to}
+                        content={collapsed ? `${item.label} — coming soon` : ''}
+                        side="right"
                       >
-                        <item.icon className="size-[18px] shrink-0" />
-                        {!collapsed && (
-                          <>
-                            <span className="flex-1 truncate">{item.label}</span>
-                            {item.hotkey && (
-                              <span className="kbd opacity-0 transition-opacity group-hover:opacity-100">
-                                {item.hotkey.replace('alt+', '⌥').replace('f2', 'F2').toUpperCase()}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </NavLink>
-                    </Tooltip>
-                  ))}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            toast('EMI Loans is coming in a future update', {
+                              description: 'This feature is being polished for a later release.'
+                            })
+                          }
+                          className={cn(
+                            `group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px]
+                             font-medium text-muted-foreground/70 transition-colors hover:bg-sidebar-accent/40`,
+                            collapsed && 'justify-center px-0'
+                          )}
+                        >
+                          <item.icon className="size-[18px] shrink-0" />
+                          {!collapsed && (
+                            <>
+                              <span className="flex-1 truncate text-left">{item.label}</span>
+                              <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[9px]">
+                                <Lock className="size-2.5" /> Upgrade
+                              </Badge>
+                            </>
+                          )}
+                        </button>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip
+                        key={item.to}
+                        content={collapsed ? item.label : ''}
+                        side="right"
+                        shortcut={collapsed && item.hotkey ? item.hotkey.toUpperCase() : undefined}
+                      >
+                        <NavLink
+                          to={item.to}
+                          end={item.end}
+                          className={({ isActive }) =>
+                            cn(
+                              `group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium
+                               text-sidebar-foreground transition-colors`,
+                              isActive
+                                ? 'bg-sidebar-accent text-accent-foreground shadow-sm'
+                                : 'hover:bg-sidebar-accent/60 hover:text-foreground',
+                              collapsed && 'justify-center px-0'
+                            )
+                          }
+                        >
+                          <item.icon className="size-[18px] shrink-0" />
+                          {!collapsed && (
+                            <>
+                              <span className="flex-1 truncate">{item.label}</span>
+                              {item.hotkey && (
+                                <span className="kbd opacity-0 transition-opacity group-hover:opacity-100">
+                                  {item.hotkey.replace('alt+', '⌥').replace('f2', 'F2').toUpperCase()}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </NavLink>
+                      </Tooltip>
+                    )
+                  )}
                 </div>
               </div>
             )

@@ -510,6 +510,146 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_notif_dedupe ON notifications(dedupe_key) W
 CREATE INDEX IF NOT EXISTS ix_notif_unread ON notifications(company_id, is_read, created_at);
 `
 
-export const MIGRATIONS: Migration[] = [{ version: 1, name: 'initial schema', sql: V1 }]
+const V2 = /* sql */ `
+-- ===========================================================================
+--  CONSUMER EMI LOANS  (buy-now-pay-later financing on a handset sale)
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS loans (
+  id                  TEXT PRIMARY KEY,
+  company_id          TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  shop_id             TEXT NOT NULL REFERENCES shops(id),
+  loan_no             TEXT NOT NULL,
+  customer_id         TEXT NOT NULL REFERENCES customers(id),
+  stock_unit_id       TEXT REFERENCES stock_units(id),
+  brand               TEXT,
+  category            TEXT,
+  model_name          TEXT,
+  imei                TEXT,
+  loan_date           TEXT NOT NULL,
+  purchase_amount     REAL NOT NULL DEFAULT 0,
+  sale_amount         REAL NOT NULL DEFAULT 0,
+  down_payment        REAL NOT NULL DEFAULT 0,
+  loan_amount         REAL NOT NULL DEFAULT 0,
+  processing_fee      REAL NOT NULL DEFAULT 0,
+  total_margin        REAL NOT NULL DEFAULT 0,
+  loan_tenure_months  INTEGER NOT NULL DEFAULT 1,
+  monthly_emi         REAL NOT NULL DEFAULT 0,
+  emi_start_date      TEXT NOT NULL,
+  emi_end_date        TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'ACTIVE',
+  current_outstanding REAL NOT NULL DEFAULT 0,
+  penalty_collected   REAL NOT NULL DEFAULT 0,
+  last_emi_paid_date  TEXT,
+  closed_date         TEXT,
+  notes               TEXT,
+  created_by          TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_loans_no ON loans(company_id, loan_no);
+CREATE INDEX IF NOT EXISTS ix_loans_company_date ON loans(company_id, loan_date);
+CREATE INDEX IF NOT EXISTS ix_loans_shop_status ON loans(shop_id, status);
+CREATE INDEX IF NOT EXISTS ix_loans_customer ON loans(customer_id);
+
+CREATE TABLE IF NOT EXISTS loan_repayments (
+  id              TEXT PRIMARY KEY,
+  loan_id         TEXT NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+  emi_no          INTEGER NOT NULL,
+  due_date        TEXT NOT NULL,
+  scheduled_emi   REAL NOT NULL DEFAULT 0,
+  repay_date      TEXT,
+  actual_emi_paid REAL NOT NULL DEFAULT 0,
+  penalty_amount  REAL NOT NULL DEFAULT 0,
+  is_penalty_paid INTEGER NOT NULL DEFAULT 0,
+  payment_mode    TEXT,
+  remarks         TEXT,
+  status          TEXT NOT NULL DEFAULT 'PENDING',
+  created_by      TEXT,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_repay_loan ON loan_repayments(loan_id, emi_no);
+CREATE INDEX IF NOT EXISTS ix_repay_due_status ON loan_repayments(due_date, status);
+`
+
+const V3 = /* sql */ `
+-- ===========================================================================
+--  LOANS — total payable, distinct from principal financed
+-- ===========================================================================
+-- "loan_amount" is the bare principal (sale amount minus down payment) and
+-- drives margin reporting. "total_payable" is what the schedule actually sums
+-- to — tenure x monthly EMI, which can exceed the principal when the shop's
+-- EMI rate embeds a financing markup. Outstanding/closed-status math must use
+-- total_payable, not loan_amount, or a manually-set EMI that doesn't divide
+-- the principal evenly produces a negative final installment.
+ALTER TABLE loans ADD COLUMN total_payable REAL NOT NULL DEFAULT 0;
+UPDATE loans SET total_payable = loan_amount WHERE total_payable = 0;
+`
+
+const V4 = /* sql */ `
+-- ===========================================================================
+--  SERVICE SALES  (recharge + repairing services alongside product sales)
+-- ===========================================================================
+-- A sale is now typed. 'product' is an ordinary goods sale (the default and the
+-- only kind before this migration). 'recharge' and 'repair' are services:
+--   - recharge: a single amount + note, no stock touched.
+--   - repair:   a labour charge plus, optionally, parts/accessories pulled from
+--               stock — those parts are ordinary stock lines that get sold.
+ALTER TABLE sales ADD COLUMN sale_type      TEXT NOT NULL DEFAULT 'product';
+ALTER TABLE sales ADD COLUMN service_title  TEXT;   -- device / recharge label
+ALTER TABLE sales ADD COLUMN service_details TEXT;  -- problem description / note
+
+-- sale_items must allow lines that are NOT a catalogue model (a labour charge,
+-- a recharge). model_id was NOT NULL, which SQLite can only relax by rebuilding
+-- the table. line_type distinguishes a goods line from a service line from a
+-- repair part. sale_items has no incoming foreign keys, so the swap is safe.
+CREATE TABLE sale_items_v2 (
+  id            TEXT PRIMARY KEY,
+  sale_id       TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  stock_unit_id TEXT REFERENCES stock_units(id),
+  model_id      TEXT REFERENCES models(id),
+  line_type     TEXT NOT NULL DEFAULT 'product',   -- 'product' | 'service' | 'part'
+  imei1         TEXT,
+  description   TEXT,
+  qty           INTEGER NOT NULL DEFAULT 1,
+  unit_price    REAL NOT NULL DEFAULT 0,
+  discount      REAL NOT NULL DEFAULT 0,
+  gst_rate      REAL NOT NULL DEFAULT 0,
+  tax_amount    REAL NOT NULL DEFAULT 0,
+  line_total    REAL NOT NULL DEFAULT 0,
+  cost_price    REAL NOT NULL DEFAULT 0,
+  profit        REAL NOT NULL DEFAULT 0
+);
+INSERT INTO sale_items_v2 (id, sale_id, stock_unit_id, model_id, line_type, imei1, description,
+    qty, unit_price, discount, gst_rate, tax_amount, line_total, cost_price, profit)
+  SELECT id, sale_id, stock_unit_id, model_id, 'product', imei1, description,
+    qty, unit_price, discount, gst_rate, tax_amount, line_total, cost_price, profit
+  FROM sale_items;
+DROP TABLE sale_items;
+ALTER TABLE sale_items_v2 RENAME TO sale_items;
+CREATE INDEX IF NOT EXISTS ix_sale_items_sale ON sale_items(sale_id);
+CREATE INDEX IF NOT EXISTS ix_sale_items_model ON sale_items(model_id);
+
+-- Optional saved price list of common services (the "manage the services" list).
+CREATE TABLE IF NOT EXISTS service_catalog (
+  id            TEXT PRIMARY KEY,
+  company_id    TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL DEFAULT 'repair',     -- 'repair' | 'recharge' | 'service'
+  name          TEXT NOT NULL,
+  default_price REAL NOT NULL DEFAULT 0,
+  gst_rate      REAL NOT NULL DEFAULT 0,
+  is_active     INTEGER NOT NULL DEFAULT 1,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_service_catalog_company ON service_catalog(company_id, kind);
+`
+
+export const MIGRATIONS: Migration[] = [
+  { version: 1, name: 'initial schema', sql: V1 },
+  { version: 2, name: 'consumer EMI loans', sql: V2 },
+  { version: 3, name: 'loans total_payable', sql: V3 },
+  { version: 4, name: 'service sales (recharge + repair)', sql: V4 }
+]
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version

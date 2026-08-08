@@ -45,6 +45,7 @@ export function SalesPage() {
   const [range, setRange] = useDateRange('sales')
   const [search, setSearch] = React.useState('')
   const [status, setStatus] = React.useState('all')
+  const [saleType, setSaleType] = React.useState('all')
   const [scope, setScope] = React.useState<string>(shopId ?? 'all')
   const [detailId, setDetailId] = React.useState<string | null>(params.get('id'))
   const [payFor, setPayFor] = React.useState<any>(null)
@@ -66,7 +67,7 @@ export function SalesPage() {
   })
 
   const sales = useQuery({
-    queryKey: ['sales', companyId, scope, range, debouncedSearch, status],
+    queryKey: ['sales', companyId, scope, range, debouncedSearch, status, saleType],
     queryFn: () =>
       api.sales.list({
         shopId: scope === 'all' ? undefined : scope,
@@ -74,6 +75,7 @@ export function SalesPage() {
         to: range.to,
         search: debouncedSearch || undefined,
         status,
+        saleType,
         limit: 400
       }),
     enabled: Boolean(companyId)
@@ -131,6 +133,8 @@ export function SalesPage() {
       setCancelFor(null)
       setCancelReason('')
       void qc.invalidateQueries({ queryKey: ['sales'] })
+      void qc.invalidateQueries({ queryKey: ['stock'] })
+      void qc.invalidateQueries({ queryKey: ['stock-summary'] })
     } catch (err: any) {
       toast.error(err.message)
     }
@@ -184,6 +188,17 @@ export function SalesPage() {
           />
         )}
         <SimpleSelect
+          value={saleType}
+          onChange={setSaleType}
+          options={[
+            { value: 'all', label: 'All types' },
+            { value: 'product', label: 'Product sales' },
+            { value: 'recharge', label: 'Recharge' },
+            { value: 'repair', label: 'Repairs' }
+          ]}
+          className="w-36"
+        />
+        <SimpleSelect
           value={status}
           onChange={setStatus}
           options={[
@@ -215,7 +230,11 @@ export function SalesPage() {
             sortable: true,
             render: (r: any) => (
               <div>
-                <p className="font-medium">{r.invoiceNo}</p>
+                <p className="flex items-center gap-1.5 font-medium">
+                  {r.invoiceNo}
+                  {r.saleType === 'recharge' && <Badge variant="info">Recharge</Badge>}
+                  {r.saleType === 'repair' && <Badge variant="warning">Repair</Badge>}
+                </p>
                 <p className="text-xs text-muted-foreground">{formatDate(r.saleDate)}</p>
               </div>
             )

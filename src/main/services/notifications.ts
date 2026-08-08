@@ -195,6 +195,71 @@ export async function scan(companyId: string): Promise<number> {
     if (ok) created++
   }
 
+  /* ---- EMI installments overdue ------------------------------------------ */
+  const emiOverdue = await all<any>(
+    `SELECT lr.id, lr.emi_no, lr.due_date, lr.scheduled_emi, lr.actual_emi_paid, l.id AS loan_id,
+            l.loan_no, l.shop_id, c.name AS customer_name, c.phone_primary,
+            CAST(julianday('now','localtime') - julianday(lr.due_date) AS INTEGER) AS days
+       FROM loan_repayments lr
+       JOIN loans l ON l.id = lr.loan_id
+       JOIN customers c ON c.id = l.customer_id
+      WHERE l.company_id = ? AND l.status = 'ACTIVE' AND lr.status IN ('PENDING','PARTIAL')
+        AND lr.due_date < date('now','localtime')
+      ORDER BY lr.due_date LIMIT 100`,
+    [companyId]
+  )
+  for (const e of emiOverdue) {
+    const days = num(e.days)
+    const due = round2(num(e.scheduled_emi) - num(e.actual_emi_paid))
+    const ok = await insert(companyId, {
+      type: 'emi_overdue',
+      severity: days > 15 ? 'danger' : 'warning',
+      title: `EMI overdue — ${e.customer_name ?? 'Customer'}`,
+      body: `₹${due} for installment #${e.emi_no} of ${e.loan_no} is ${days} day(s) late${
+        e.phone_primary ? ` · ${e.phone_primary}` : ''
+      }`,
+      link: `/loans/${e.loan_id}/repay`,
+      entity: 'loan',
+      entityId: e.loan_id,
+      dueAt: e.due_date,
+      shopId: e.shop_id,
+      dedupeKey: `emi_overdue:${e.id}:${day}`
+    })
+    if (ok) created++
+  }
+
+  /* ---- EMI due today / tomorrow ------------------------------------------ */
+  const emiDueSoon = await all<any>(
+    `SELECT lr.id, lr.emi_no, lr.due_date, lr.scheduled_emi, lr.actual_emi_paid, l.id AS loan_id,
+            l.loan_no, l.shop_id, c.name AS customer_name, c.phone_primary
+       FROM loan_repayments lr
+       JOIN loans l ON l.id = lr.loan_id
+       JOIN customers c ON c.id = l.customer_id
+      WHERE l.company_id = ? AND l.status = 'ACTIVE' AND lr.status IN ('PENDING','PARTIAL')
+        AND lr.due_date IN (date('now','localtime'), date('now','localtime','+1 day'))
+      LIMIT 50`,
+    [companyId]
+  )
+  for (const e of emiDueSoon) {
+    const isToday = e.due_date === day
+    const due = round2(num(e.scheduled_emi) - num(e.actual_emi_paid))
+    const ok = await insert(companyId, {
+      type: 'emi_due',
+      severity: 'info',
+      title: `EMI due ${isToday ? 'today' : 'tomorrow'} — ${e.customer_name ?? 'Customer'}`,
+      body: `₹${due} for installment #${e.emi_no} of ${e.loan_no}${
+        e.phone_primary ? ` · ${e.phone_primary}` : ''
+      }`,
+      link: `/loans/${e.loan_id}/repay`,
+      entity: 'loan',
+      entityId: e.loan_id,
+      dueAt: e.due_date,
+      shopId: e.shop_id,
+      dedupeKey: `emi_due:${e.id}:${e.due_date}`
+    })
+    if (ok) created++
+  }
+
   /* ---- stock sitting over 90 days ---------------------------------------- */
   const dead = await all<any>(
     `SELECT sh.id AS shop_id, sh.name AS shop_name, COUNT(*) AS n,

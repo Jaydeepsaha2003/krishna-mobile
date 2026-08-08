@@ -91,6 +91,10 @@ export const PERMISSIONS = {
   'stock.adjust': 'Adjust stock (damage / loss / return)',
   'reconciliation.view': 'View reconciliations',
   'reconciliation.manage': 'Run & finalise reconciliations',
+  'loan.view': 'View EMI loans',
+  'loan.manage': 'Create / edit EMI loans',
+  'loan.repayment': 'Record EMI repayments',
+  'loan.foreclose': 'Foreclose / write off EMI loans',
   // Insight
   'report.view': 'View reports',
   'report.profit': 'View cost price & profit figures',
@@ -137,6 +141,10 @@ export const ROLE_PERMISSIONS: Record<Exclude<Role, 'custom'>, Permission[]> = {
     'stock.adjust',
     'reconciliation.view',
     'reconciliation.manage',
+    'loan.view',
+    'loan.manage',
+    'loan.repayment',
+    'loan.foreclose',
     'report.view',
     'report.profit'
   ],
@@ -151,6 +159,9 @@ export const ROLE_PERMISSIONS: Record<Exclude<Role, 'custom'>, Permission[]> = {
     'payment.manage',
     'stock.view',
     'transfer.view',
+    'loan.view',
+    'loan.manage',
+    'loan.repayment',
     'report.view'
   ],
   viewer: [
@@ -164,6 +175,7 @@ export const ROLE_PERMISSIONS: Record<Exclude<Role, 'custom'>, Permission[]> = {
     'transfer.view',
     'stock.view',
     'reconciliation.view',
+    'loan.view',
     'report.view'
   ]
 }
@@ -214,6 +226,36 @@ export type SaleStatus = (typeof SALE_STATUSES)[number]
 export const CONDITIONS = ['New', 'Open Box', 'Refurbished', 'Second Hand', 'Exchange'] as const
 
 /* -------------------------------------------------------------------------- */
+/*  Consumer EMI loans                                                         */
+/* -------------------------------------------------------------------------- */
+
+export const LOAN_STATUSES = ['ACTIVE', 'CLOSED', 'FORECLOSED', 'CANCELLED'] as const
+export type LoanStatus = (typeof LOAN_STATUSES)[number]
+
+export const LOAN_STATUS_LABELS: Record<LoanStatus, string> = {
+  ACTIVE: 'Active',
+  CLOSED: 'Closed',
+  FORECLOSED: 'Foreclosed',
+  CANCELLED: 'Cancelled'
+}
+
+export const EMI_STATUSES = ['PENDING', 'PARTIAL', 'PAID', 'FORECLOSED', 'WAIVED'] as const
+export type EmiStatus = (typeof EMI_STATUSES)[number]
+
+export const EMI_STATUS_LABELS: Record<EmiStatus, string> = {
+  PENDING: 'Pending',
+  PARTIAL: 'Partially paid',
+  PAID: 'Paid',
+  FORECLOSED: 'Foreclosed',
+  WAIVED: 'Waived'
+}
+
+export const LOAN_TENURE_PRESETS = [3, 6, 9, 12, 18, 24] as const
+
+/** Settings-table key holding the shop-wide default late-payment penalty. */
+export const SETTING_DEFAULT_PENALTY = 'loan.defaultPenaltyAmount'
+
+/* -------------------------------------------------------------------------- */
 /*  Reconciliation — default shortage / excess reasons                         */
 /* -------------------------------------------------------------------------- */
 
@@ -253,3 +295,21 @@ export const PIN_LENGTH = 6
 export const CURRENCY = '₹'
 
 export const APP_NAME = 'Krishna Mobile'
+
+/* -------------------------------------------------------------------------- */
+/*  Feature flags                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Toggles for features that are built but not yet released to shops. Flip a flag
+ * to `true` to unlock everywhere (nav, routes, reports, settings) in one place.
+ *
+ * `emiLoans` — the consumer-EMI module is complete but held back for a later,
+ * polished release; while it is `false` the menus show as a locked "Upgrade"
+ * teaser and the screens are unreachable.
+ */
+export const FEATURES = {
+  emiLoans: false,
+  /** The old MS Access importer — held back on this release. */
+  dataImport: false
+} as const

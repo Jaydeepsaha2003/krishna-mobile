@@ -163,6 +163,50 @@ export async function availableStock(shopId: string, search?: string, limit = 50
   return rows.map(shapeUnit)
 }
 
+/**
+ * Non-IMEI models (accessories, chargers…) that have stock at a shop, with the
+ * available quantity. Powers the "sell by quantity" picker so the cashier picks
+ * the item once and types how many — capped at what's actually in stock.
+ */
+export async function availableModels(shopId: string, search?: string, limit = 50) {
+  requirePermission('stock.view')
+  const { companyId } = requireCompany()
+  // Param order matches the query: shopId (JOIN), companyId (WHERE), search x3, limit.
+  const args: any[] = [shopId, companyId]
+  let extra = ''
+  if (search) {
+    const q = `%${search.trim()}%`
+    extra = 'AND (m.name LIKE ? OR m.sku LIKE ? OR b.name LIKE ?)'
+    args.push(q, q, q)
+  }
+  const rows = await all<any>(
+    `SELECT m.id AS model_id, m.name AS model_name, m.sku, m.default_price, m.gst_rate,
+            b.name AS brand_name, COUNT(su.id) AS available,
+            COALESCE(AVG(su.cost_price), 0) AS avg_cost,
+            COALESCE(NULLIF(MAX(su.sale_price), 0), m.default_price) AS sale_price
+       FROM models m
+       JOIN brands b ON b.id = m.brand_id
+       JOIN stock_units su
+              ON su.model_id = m.id AND su.status = 'in_stock' AND su.current_shop_id = ?
+      WHERE m.company_id = ? AND m.is_active = 1 AND m.track_imei = 0 ${extra}
+      GROUP BY m.id
+      HAVING available > 0
+      ORDER BY b.name, m.name
+      LIMIT ?`,
+    [...args, limit]
+  )
+  return rows.map((r) => ({
+    modelId: r.model_id,
+    brandName: r.brand_name,
+    modelName: r.model_name,
+    sku: r.sku,
+    available: r.available ?? 0,
+    salePrice: round2(num(r.sale_price)),
+    gstRate: num(r.gst_rate, 18),
+    avgCost: round2(num(r.avg_cost))
+  }))
+}
+
 /** Model-wise stock roll-up for a shop (or the whole company). */
 export async function stockSummary(shopId?: string) {
   requirePermission('stock.view')

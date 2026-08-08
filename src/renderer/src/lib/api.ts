@@ -101,6 +101,8 @@ export const api = {
     byImei: (imei: string) => call('stock:byImei', { imei }),
     available: (shopId: string, search?: string, limit?: number) =>
       call('stock:available', { shopId, search, limit }),
+    availableModels: (shopId: string, search?: string, limit?: number) =>
+      call('stock:availableModels', { shopId, search, limit }),
     summary: (shopId?: string) => call('stock:summary', { shopId }),
     adjust: (input: any) => call('stock:adjust', input),
     adjustments: (params: any = {}) => call('stock:adjustments', params)
@@ -127,6 +129,11 @@ export const api = {
     recordPayment: (input: any) => call('sales:recordPayment', input),
     creditBook: (params: any = {}) => call('sales:creditBook', params)
   },
+  services: {
+    list: (params: any = {}) => call('services:list', params),
+    save: (input: any) => call('services:save', input),
+    remove: (id: string) => call('services:delete', { id })
+  },
   recon: {
     preview: (params: any) => call('recon:preview', params),
     create: (input: any) => call('recon:create', input),
@@ -140,6 +147,17 @@ export const api = {
     remove: (id: string) => call('recon:delete', { id }),
     reasons: (includeInactive = false) => call('recon:reasons', { includeInactive }),
     saveReason: (input: any) => call('recon:saveReason', input)
+  },
+  loans: {
+    create: (input: any) => call('loans:create', input),
+    list: (filter: any = {}) => call('loans:list', filter),
+    get: (id: string) => call('loans:get', { id }),
+    search: (search: string, onlyActive = true) => call('loans:search', { search, onlyActive }),
+    repay: (input: any) => call('loans:repay', input),
+    foreclose: (input: any) => call('loans:foreclose', input),
+    cancel: (loanId: string, reason: string) => call('loans:cancel', { loanId, reason }),
+    analysis: (params: any) => call('loans:analysis', params),
+    analysisGrid: (params: any) => call('loans:analysisGrid', params)
   },
   reports: {
     dashboard: (params: any = {}) => call('reports:dashboard', params),
@@ -163,6 +181,11 @@ export const api = {
   },
   audit: {
     list: (params: any) => call('audit:list', params)
+  },
+  import: {
+    pickAccessFile: () => call<{ filePath: string | null }>('import:pickAccessFile'),
+    previewAccess: (filePath: string) => call('import:previewAccess', { filePath }),
+    runAccess: (filePath: string, shopId?: string) => call('import:runAccess', { filePath, shopId })
   },
   settings: {
     get: <T>(key: string, fallback: T) => call<T>('settings:get', { key, fallback }),

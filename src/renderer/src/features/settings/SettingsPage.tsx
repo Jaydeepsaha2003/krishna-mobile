@@ -7,6 +7,7 @@ import {
   ClipboardList,
   Database,
   Download,
+  HandCoins,
   Info,
   KeyRound,
   ListChecks,
@@ -17,14 +18,15 @@ import {
   ShieldCheck,
   Store,
   Unlock,
-  Users
+  Users,
+  Wrench
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useDateRange, useReconReasons, useScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { useTheme } from '@/lib/theme'
-import { formatDateTime, initials, relativeTime } from '@/lib/utils'
-import { ALL_PERMISSIONS, PERMISSIONS, ROLE_LABELS, type Permission } from '@shared/constants'
+import { formatDateTime, initials, money, relativeTime } from '@/lib/utils'
+import { ALL_PERMISSIONS, FEATURES, PERMISSIONS, ROLE_LABELS, SETTING_DEFAULT_PENALTY, type Permission } from '@shared/constants'
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Field, Input, Separator } from '@/components/ui/base'
 import { DataTable } from '@/components/ui/data-table'
 import {
@@ -40,6 +42,8 @@ import { MultiCombobox } from '@/components/ui/combobox'
 import { DateRangePicker, EmptyState, PageHeader, PinInput } from '@/components/ui/misc'
 import { ChangePinDialog } from '@/components/layout/ChangePinDialog'
 import { CompanyFormDialog, ShopFormDialog } from './OrgDialogs'
+import { ImportAccessTab } from './ImportAccessTab'
+import { ServicesTab } from './ServicesTab'
 
 export function SettingsPage() {
   const [params, setParams] = useSearchParams()
@@ -71,9 +75,24 @@ export function SettingsPage() {
               <ListChecks /> Reasons
             </TabsTrigger>
           )}
+          {session.can('product.manage') && (
+            <TabsTrigger value="services">
+              <Wrench /> Services
+            </TabsTrigger>
+          )}
+          {FEATURES.emiLoans && session.can('loan.manage') && (
+            <TabsTrigger value="loans">
+              <HandCoins /> EMI loans
+            </TabsTrigger>
+          )}
           {session.can('audit.view') && (
             <TabsTrigger value="audit">
               <ClipboardList /> Audit trail
+            </TabsTrigger>
+          )}
+          {FEATURES.dataImport && session.can('settings.manage') && (
+            <TabsTrigger value="import">
+              <Database /> Import data
             </TabsTrigger>
           )}
           <TabsTrigger value="about">
@@ -93,8 +112,17 @@ export function SettingsPage() {
         <TabsContent value="reasons">
           <ReasonsTab />
         </TabsContent>
+        <TabsContent value="services">
+          <ServicesTab />
+        </TabsContent>
+        <TabsContent value="loans">
+          <LoanSettingsTab />
+        </TabsContent>
         <TabsContent value="audit">
           <AuditTab />
+        </TabsContent>
+        <TabsContent value="import">
+          <ImportAccessTab />
         </TabsContent>
         <TabsContent value="about">
           <AboutTab />
@@ -874,6 +902,64 @@ function ReasonsTab() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/* ========================================================================== */
+/*  EMI loan settings                                                          */
+/* ========================================================================== */
+
+function LoanSettingsTab() {
+  const [penalty, setPenalty] = React.useState<number | ''>('')
+  const [loading, setLoading] = React.useState(true)
+  const [saving, setSaving] = React.useState(false)
+
+  React.useEffect(() => {
+    void (async () => {
+      setPenalty(await api.settings.get<number>(SETTING_DEFAULT_PENALTY, 500))
+      setLoading(false)
+    })()
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.settings.set(SETTING_DEFAULT_PENALTY, Number(penalty) || 0)
+      toast.success('EMI settings saved')
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className="max-w-lg">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <HandCoins className="size-4" /> EMI loan defaults
+        </CardTitle>
+        <CardDescription>
+          Applied as a suggested penalty whenever an installment is collected after its due date.
+          It is always editable at the time of collection.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Field label="Default late-payment penalty ₹" hint={`Currently ${money(penalty || 0)}`}>
+          <Input
+            type="number"
+            min={0}
+            value={penalty}
+            disabled={loading}
+            onChange={(e) => setPenalty(e.target.value === '' ? '' : Number(e.target.value))}
+            className="text-right tnum"
+          />
+        </Field>
+        <Button onClick={() => void save()} loading={saving} disabled={loading}>
+          Save
+        </Button>
+      </CardContent>
+    </Card>
   )
 }
 

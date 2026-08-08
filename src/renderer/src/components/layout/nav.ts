@@ -3,6 +3,7 @@ import {
   BadgeIndianRupee,
   Boxes,
   ClipboardCheck,
+  HandCoins,
   LayoutDashboard,
   type LucideIcon,
   Package,
@@ -13,7 +14,7 @@ import {
   Truck,
   Users
 } from 'lucide-react'
-import type { Permission } from '@shared/constants'
+import { FEATURES, type Permission } from '@shared/constants'
 
 export interface NavItem {
   to: string
@@ -21,8 +22,10 @@ export interface NavItem {
   icon: LucideIcon
   permission?: Permission
   hotkey?: string
-  group: 'Daily' | 'Records' | 'Insight' | 'Setup'
+  group: 'Daily' | 'Records' | 'Insight' | 'Setup' | 'Upgrade'
   end?: boolean
+  /** Shown as a locked teaser — not navigable, no permission gate. */
+  locked?: boolean
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -38,7 +41,16 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/catalogue', label: 'Brands & Models', icon: Smartphone, permission: 'product.view', group: 'Records' },
   { to: '/reconciliation', label: 'Reconciliation', icon: ClipboardCheck, permission: 'reconciliation.view', hotkey: 'alt+8', group: 'Insight' },
   { to: '/reports', label: 'Reports', icon: BadgeIndianRupee, permission: 'report.view', hotkey: 'alt+9', group: 'Insight' },
-  { to: '/settings', label: 'Settings', icon: Settings, group: 'Setup' }
+  { to: '/settings', label: 'Settings', icon: Settings, group: 'Setup' },
+  // EMI loans: fully built, released via FEATURES.emiLoans. Unlocked -> the real
+  // menus in their normal spots; locked -> a single "Upgrade" teaser at the
+  // bottom that isn't navigable.
+  ...(FEATURES.emiLoans
+    ? ([
+        { to: '/loans/new', label: 'New EMI Loan', icon: HandCoins, permission: 'loan.manage', group: 'Daily' },
+        { to: '/loans', label: 'EMI Loans', icon: HandCoins, permission: 'loan.view', hotkey: 'alt+0', group: 'Records', end: true }
+      ] as NavItem[])
+    : ([{ to: '/loans', label: 'EMI Loans', icon: HandCoins, group: 'Upgrade', locked: true }] as NavItem[]))
 ]
 
-export const NAV_GROUPS: NavItem['group'][] = ['Daily', 'Records', 'Insight', 'Setup']
+export const NAV_GROUPS: NavItem['group'][] = ['Daily', 'Records', 'Insight', 'Setup', 'Upgrade']

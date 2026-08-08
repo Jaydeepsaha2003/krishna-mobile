@@ -24,7 +24,8 @@
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
     "electron-log": "^5.4.4",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "mdb-reader": "^3.2.0"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

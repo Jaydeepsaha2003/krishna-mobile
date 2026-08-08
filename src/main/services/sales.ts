@@ -16,21 +16,32 @@ import { logAudit } from './audit'
 /*  CREATE SALE                                                               */
 /* ========================================================================== */
 
+export type SaleType = 'product' | 'recharge' | 'repair'
+export type LineType = 'product' | 'service' | 'part'
+
 export interface SaleItemInput {
   stockUnitId?: string
-  modelId: string
+  /** Optional now — a service line (labour, recharge) has no catalogue model. */
+  modelId?: string
+  /** 'product' (goods), 'service' (labour / recharge), 'part' (repair part from stock). */
+  lineType?: LineType
   description?: string
   qty?: number
   /** Price actually charged to the customer, GST inclusive. */
   unitPrice: number
   discount?: number
   gstRate?: number
+  /** Cost for a non-stock line (a service usually costs the shop nothing). */
+  costPrice?: number
 }
 
 export interface SaleInput {
   shopId: string
   customerId?: string
   saleDate: string
+  saleType?: SaleType
+  serviceTitle?: string
+  serviceDetails?: string
   items: SaleItemInput[]
   discount?: number
   otherCharges?: number
@@ -74,19 +85,24 @@ export async function createSale(input: SaleInput) {
   let itemsTotal = 0
   let taxTotal = 0
   let taxableTotal = 0
-  let costTotal = 0
 
   const lines = input.items.map((item) => {
+    const unit = item.stockUnitId ? unitMap.get(item.stockUnitId) : null
+    // A line is a "service" when it carries neither a stock unit nor a model —
+    // a labour charge or a recharge. Everything else is goods (product/part).
+    const lineType: LineType =
+      item.lineType ?? (unit || item.modelId ? 'product' : 'service')
+    const isService = lineType === 'service'
+
     const qty = Math.max(1, Math.floor(num(item.qty, 1)))
     const unitPrice = num(item.unitPrice)
-    if (unitPrice <= 0) throw new AppError('Enter a selling price for every line.', 'VALIDATION')
+    if (unitPrice <= 0) throw new AppError('Enter a price for every line.', 'VALIDATION')
 
     const lineDiscount = num(item.discount)
     if (lineDiscount > 0) requirePermission('sale.discount')
 
-    const unit = item.stockUnitId ? unitMap.get(item.stockUnitId) : null
     if (item.stockUnitId) {
-      if (!unit) throw new AppError('A selected handset no longer exists.', 'VALIDATION')
+      if (!unit) throw new AppError('A selected item no longer exists.', 'VALIDATION')
       if (unit.status !== 'in_stock')
         throw new AppError(
           `${unit.brand_name} ${unit.model_name} (${unit.imei1 ?? 'no IMEI'}) is "${unit.status}" and cannot be sold.`,
@@ -97,32 +113,23 @@ export async function createSale(input: SaleInput) {
           `${unit.brand_name} ${unit.model_name} is not in this shop's stock.`,
           'BAD_SHOP'
         )
+    } else if (!isService && !item.modelId) {
+      throw new AppError('A goods line needs a product — pick one from stock.', 'VALIDATION')
     }
 
-    const gstRate = num(item.gstRate, num(unit?.gst_rate, 18))
+    // Services default to 0% GST (a recharge / labour charge is not GST-rated
+    // goods); goods keep the model's rate, defaulting to 18%.
+    const gstRate = num(item.gstRate, isService ? 0 : num(unit?.gst_rate, 18))
     const lineTotal = round2(unitPrice * qty - lineDiscount)
-    // Prices are GST inclusive, as printed on the handset box.
+    // Prices are GST inclusive, as printed on the box.
     const taxable = round2(lineTotal / (1 + gstRate / 100))
     const tax = round2(lineTotal - taxable)
-    const cost = unit ? num(unit.cost_price) : 0
 
     itemsTotal += lineTotal
     taxableTotal += taxable
     taxTotal += tax
-    costTotal += cost * (unit ? 1 : qty)
 
-    return {
-      item,
-      unit,
-      qty,
-      unitPrice,
-      lineDiscount,
-      gstRate,
-      lineTotal,
-      taxable,
-      tax,
-      cost: unit ? cost : 0
-    }
+    return { item, unit, lineType, qty, unitPrice, lineDiscount, gstRate, lineTotal, taxable, tax }
   })
 
   const otherCharges = num(input.otherCharges)
@@ -157,8 +164,13 @@ export async function createSale(input: SaleInput) {
       )
   }
 
-  const totalProfit = round2(total - costTotal)
   const saleDate = input.saleDate || today()
+  const saleType: SaleType = input.saleType ?? 'product'
+  // Cost (and therefore profit) is resolved inside the transaction, because a
+  // quantity line consumes real stock units whose landed cost we only know once
+  // we pick them.
+  let costTotal = 0
+  let totalProfit = 0
 
   const shop = await one<{ invoice_prefix: string; code: string }>(
     'SELECT invoice_prefix, code FROM shops WHERE id = ?',
@@ -181,12 +193,62 @@ export async function createSale(input: SaleInput) {
   const ts = nowIso()
 
   await tx(async (t) => {
+    // Phase 1 — resolve each line's cost and the exact stock units it consumes.
+    // A quantity line (a model, no specific unit) pulls `qty` in-stock units of
+    // that model at this shop, oldest first. If there aren't enough, the whole
+    // bill is refused — this is what prevents overselling.
+    const resolved: Array<{
+      line: (typeof lines)[number]
+      itemId: string
+      cost: number
+      unitIds: string[]
+      imei1: string | null
+      description: string
+    }> = []
+
+    for (const line of lines) {
+      const itemId = newId()
+      const description =
+        line.item.description ??
+        (line.unit ? `${line.unit.brand_name} ${line.unit.model_name}` : 'Item')
+      let cost = 0
+      let consume: string[] = []
+      let imei1: string | null = null
+
+      if (line.unit) {
+        cost = round2(num(line.unit.cost_price))
+        consume = [line.unit.id]
+        imei1 = line.unit.imei1 ?? null
+      } else if (line.lineType !== 'service' && line.item.modelId) {
+        const avail = await t.all<{ id: string; cost_price: number }>(
+          `SELECT id, cost_price FROM stock_units
+             WHERE company_id = ? AND model_id = ? AND current_shop_id = ? AND status = 'in_stock'
+             ORDER BY added_at LIMIT ?`,
+          [companyId, line.item.modelId, input.shopId, line.qty]
+        )
+        if (avail.length < line.qty)
+          throw new AppError(
+            `Only ${avail.length} of "${description}" in stock — cannot sell ${line.qty}.`,
+            'NO_STOCK'
+          )
+        cost = round2(avail.reduce((a, u) => a + num(u.cost_price), 0))
+        consume = avail.map((u) => u.id)
+      } else {
+        // Service line (labour / recharge) — no stock consumed.
+        cost = round2(num(line.item.costPrice))
+      }
+
+      costTotal = round2(costTotal + cost)
+      resolved.push({ line, itemId, cost, unitIds: consume, imei1, description })
+    }
+    totalProfit = round2(total - costTotal)
+
     await t.run(
-      `INSERT INTO sales (id, company_id, shop_id, customer_id, invoice_no, sale_date, subtotal,
-         discount, tax_amount, other_charges, round_off, total, paid_amount, due_amount,
-         payment_mode, is_credit, due_date, promised_note, status, total_cost, total_profit,
-         notes, created_by, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO sales (id, company_id, shop_id, customer_id, invoice_no, sale_date, sale_type,
+         service_title, service_details, subtotal, discount, tax_amount, other_charges, round_off,
+         total, paid_amount, due_amount, payment_mode, is_credit, due_date, promised_note, status,
+         total_cost, total_profit, notes, created_by, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         saleId,
         companyId,
@@ -194,6 +256,9 @@ export async function createSale(input: SaleInput) {
         nullify(input.customerId),
         invoiceNo,
         saleDate,
+        saleType,
+        nullify(input.serviceTitle),
+        nullify(input.serviceDetails),
         round2(taxableTotal),
         billDiscount,
         round2(taxTotal),
@@ -216,39 +281,37 @@ export async function createSale(input: SaleInput) {
       ]
     )
 
-    for (const line of lines) {
-      const itemId = newId()
-      const description =
-        line.item.description ??
-        (line.unit ? `${line.unit.brand_name} ${line.unit.model_name}` : 'Item')
-
+    for (const r of resolved) {
       await t.run(
-        `INSERT INTO sale_items (id, sale_id, stock_unit_id, model_id, imei1, description, qty,
-           unit_price, discount, gst_rate, tax_amount, line_total, cost_price, profit)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO sale_items (id, sale_id, stock_unit_id, model_id, line_type, imei1, description,
+           qty, unit_price, discount, gst_rate, tax_amount, line_total, cost_price, profit)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
-          itemId,
+          r.itemId,
           saleId,
-          nullify(line.item.stockUnitId),
-          line.item.modelId,
-          nullify(line.unit?.imei1),
-          description,
-          line.qty,
-          line.unitPrice,
-          line.lineDiscount,
-          line.gstRate,
-          line.tax,
-          line.lineTotal,
-          line.cost,
-          round2(line.lineTotal - line.cost)
+          // Only a single-unit line pins one stock unit; a quantity line spans
+          // several, tracked via each unit's sale_id instead.
+          nullify(r.unitIds.length === 1 ? r.unitIds[0] : null),
+          nullify(r.line.item.modelId ?? r.line.unit?.model_id),
+          r.line.lineType,
+          nullify(r.imei1),
+          r.description,
+          r.line.qty,
+          r.line.unitPrice,
+          r.line.lineDiscount,
+          r.line.gstRate,
+          r.line.tax,
+          r.line.lineTotal,
+          r.cost,
+          round2(r.line.lineTotal - r.cost)
         ]
       )
 
-      if (line.unit) {
+      for (const uid of r.unitIds) {
         await t.run(
           `UPDATE stock_units SET status = 'sold', sale_id = ?, sale_item_id = ?, sold_at = ?,
                   sale_price = ?, updated_at = ? WHERE id = ?`,
-          [saleId, itemId, saleDate, line.unitPrice, ts, line.unit.id]
+          [saleId, r.itemId, saleDate, r.line.unitPrice, ts, uid]
         )
       }
     }
@@ -297,6 +360,7 @@ export interface SaleFilter {
   to?: string
   search?: string
   status?: string
+  saleType?: string
   onlyCredit?: boolean
   onlyOverdue?: boolean
   createdBy?: string
@@ -329,6 +393,10 @@ function saleWhere(companyId: string, f: SaleFilter) {
     args.push(f.status)
   } else {
     where.push("s.status <> 'cancelled'")
+  }
+  if (f.saleType && f.saleType !== 'all') {
+    where.push('s.sale_type = ?')
+    args.push(f.saleType)
   }
   if (f.createdBy) {
     where.push('s.created_by = ?')
@@ -383,6 +451,9 @@ function shapeSale(r: any) {
     id: r.id,
     invoiceNo: r.invoice_no,
     saleDate: r.sale_date,
+    saleType: r.sale_type ?? 'product',
+    serviceTitle: r.service_title,
+    serviceDetails: r.service_details,
     customerId: r.customer_id,
     customerName: r.customer_name ?? 'Walk-in customer',
     customerPhone: r.customer_phone,
@@ -438,8 +509,8 @@ export async function getSale(id: string) {
   const items = await all<any>(
     `SELECT si.*, m.name AS model_name, m.sku, m.hsn, b.name AS brand_name, su.warranty_months
        FROM sale_items si
-       JOIN models m ON m.id = si.model_id
-       JOIN brands b ON b.id = m.brand_id
+       LEFT JOIN models m ON m.id = si.model_id
+       LEFT JOIN brands b ON b.id = m.brand_id
        LEFT JOIN stock_units su ON su.id = si.stock_unit_id
       WHERE si.sale_id = ?`,
     [id]

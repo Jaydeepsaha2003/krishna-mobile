@@ -112,7 +112,7 @@ export function CommandPalette({
     navigate(to)
   }
 
-  const navItems = NAV_ITEMS.filter((i) => !i.permission || session.can(i.permission))
+  const navItems = NAV_ITEMS.filter((i) => !i.locked && (!i.permission || session.can(i.permission)))
 
   const ICONS = { customer: Users, stock: Smartphone, sale: ArrowRight }
 

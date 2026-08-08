@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
+import { FEATURES } from '@shared/constants'
 import { useSession } from '@/store/session'
 import { AppShell } from '@/components/layout/AppShell'
 import { LoginScreen } from '@/features/auth/LoginScreen'
@@ -17,6 +18,9 @@ import { SuppliersPage } from '@/features/suppliers/SuppliersPage'
 import { CataloguePage } from '@/features/catalogue/CataloguePage'
 import { ReconciliationPage } from '@/features/reconciliation/ReconciliationPage'
 import { ReconciliationDetailPage } from '@/features/reconciliation/ReconciliationDetailPage'
+import { NewLoanPage } from '@/features/loans/NewLoanPage'
+import { LoansPage } from '@/features/loans/LoansPage'
+import { LoanRepaymentPage } from '@/features/loans/LoanRepaymentPage'
 import { ReportsPage } from '@/features/reports/ReportsPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 
@@ -91,6 +95,16 @@ export default function App() {
         <Route path="catalogue" element={<CataloguePage />} />
         <Route path="reconciliation" element={<ReconciliationPage />} />
         <Route path="reconciliation/:id" element={<ReconciliationDetailPage />} />
+        {FEATURES.emiLoans ? (
+          <>
+            <Route path="loans/new" element={<NewLoanPage />} />
+            <Route path="loans/:id/repay" element={<LoanRepaymentPage />} />
+            <Route path="loans" element={<LoansPage />} />
+          </>
+        ) : (
+          // EMI module locked — any /loans URL falls back to the dashboard.
+          <Route path="loans/*" element={<Navigate to="/" replace />} />
+        )}
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

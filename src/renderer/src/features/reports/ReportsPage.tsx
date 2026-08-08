@@ -13,7 +13,8 @@ import {
   XAxis,
   YAxis
 } from 'recharts'
-import { Download, Search, Store, TrendingUp } from 'lucide-react'
+import { Download, HandCoins, Search, Store, TrendingUp } from 'lucide-react'
+import { FEATURES } from '@shared/constants'
 import { api } from '@/lib/api'
 import { useBrands, useCsvExport, useDateRange, useDebounced, useScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
@@ -97,6 +98,18 @@ export function ReportsPage() {
     enabled: Boolean(companyId) && tab === 'gst'
   })
 
+  const loanAnalysis = useQuery({
+    queryKey: ['rep-loan-kpi', companyId, scope, range],
+    queryFn: () => api.loans.analysis(base),
+    enabled: Boolean(companyId) && tab === 'emi'
+  })
+
+  const loanGrid = useQuery({
+    queryKey: ['rep-loan-grid', companyId, scope, range, debounced],
+    queryFn: () => api.loans.analysisGrid({ ...base, search: debounced || undefined }),
+    enabled: Boolean(companyId) && tab === 'emi'
+  })
+
   const pnlRows = pnl.data ?? []
   const totals = pnlRows.reduce(
     (a: any, r: any) => ({
@@ -139,6 +152,11 @@ export function ReportsPage() {
             <TabsTrigger value="handsets">Per handset</TabsTrigger>
             <TabsTrigger value="models">Models & brands</TabsTrigger>
             <TabsTrigger value="staff">Staff & payments</TabsTrigger>
+            {FEATURES.emiLoans && (
+              <TabsTrigger value="emi">
+                <HandCoins /> EMI loans
+              </TabsTrigger>
+            )}
             <TabsTrigger value="gst">GST</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -589,6 +607,165 @@ export function ReportsPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* ----------------------------------------------------------- emi */}
+        <TabsContent value="emi" className="mt-0 space-y-4">
+          {!session.can('loan.view') ? (
+            <EmptyState icon={HandCoins} title="EMI loans are restricted" description="Ask an administrator for the “View EMI loans” permission." />
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <StatCard label="Sales financed" value={money(loanAnalysis.data?.totalSales)} tone="primary" />
+                <StatCard label="Purchase cost" value={money(loanAnalysis.data?.totalPurchase)} />
+                {canProfit && (
+                  <StatCard label="Margin" value={money(loanAnalysis.data?.totalMargin)} tone="success" />
+                )}
+                <StatCard label="Processing fee" value={money(loanAnalysis.data?.processingFee)} tone="info" />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  label="EMI collected"
+                  value={money(loanAnalysis.data?.emiCollected)}
+                  sub={`Net of penalty: ${money(loanAnalysis.data?.netEmiCollection)}`}
+                  tone="success"
+                />
+                <StatCard label="Penalty collected" value={money(loanAnalysis.data?.penaltyCollected)} />
+                <StatCard
+                  label="Outstanding (active)"
+                  value={money(loanAnalysis.data?.outstanding)}
+                  tone={(loanAnalysis.data?.outstanding ?? 0) > 0 ? 'warning' : 'success'}
+                />
+                <StatCard
+                  label="Recovery period"
+                  value={`${loanAnalysis.data?.recoveryMonths ?? 0} mo`}
+                  sub="Until the last active EMI is due"
+                  tone={
+                    (loanAnalysis.data?.recoveryMonths ?? 0) <= 12
+                      ? 'success'
+                      : (loanAnalysis.data?.recoveryMonths ?? 0) <= 24
+                        ? 'warning'
+                        : 'danger'
+                  }
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <StatCard
+                  label="Overdue EMI"
+                  value={String(loanAnalysis.data?.overdueCount ?? 0)}
+                  sub={money(loanAnalysis.data?.overdueAmount)}
+                  tone={(loanAnalysis.data?.overdueCount ?? 0) > 0 ? 'danger' : 'success'}
+                />
+                <StatCard label="Penalty overdue (est.)" value={money(loanAnalysis.data?.penaltyOverdueEstimate)} tone="warning" />
+                <StatCard label="Loans opened" value={String(loanAnalysis.data?.totalLoans ?? 0)} />
+                <StatCard label="Active / Closed" value={`${loanAnalysis.data?.activeLoans ?? 0} / ${loanAnalysis.data?.closedLoans ?? 0}`} />
+                <StatCard label="Customers" value={String(loanAnalysis.data?.totalCustomers ?? 0)} />
+              </div>
+
+              <Toolbar>
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Customer, phone, brand or model…"
+                  prefixNode={<Search />}
+                  className="w-80"
+                />
+                <div className="flex-1" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void exportCsv('emi-loan-analysis', loanGrid.data ?? [])}
+                >
+                  <Download /> Export
+                </Button>
+              </Toolbar>
+
+              <DataTable
+                rows={loanGrid.data ?? []}
+                rowKey={(r: any) => r.id}
+                loading={loanGrid.isLoading}
+                empty="No EMI loans opened in this period"
+                maxHeight="calc(100vh - 560px)"
+                showFooter
+                columns={[
+                  {
+                    key: 'loanNo',
+                    header: 'Loan',
+                    render: (r: any) => (
+                      <div>
+                        <p className="font-medium">{r.loanNo}</p>
+                        <p className="text-xs text-muted-foreground">{formatDate(r.loanDate)}</p>
+                      </div>
+                    ),
+                    footer: () => 'Total'
+                  },
+                  {
+                    key: 'customerName',
+                    header: 'Customer',
+                    render: (r: any) => (
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{r.customerName}</p>
+                        <p className="truncate text-xs text-muted-foreground">{r.customerPhone ?? '—'}</p>
+                      </div>
+                    )
+                  },
+                  {
+                    key: 'modelName',
+                    header: 'Product',
+                    hideBelow: 'lg',
+                    render: (r: any) => [r.brand, r.modelName].filter(Boolean).join(' ') || '—'
+                  },
+                  { key: 'shopCode', header: 'Shop', render: (r: any) => <Badge variant="outline">{r.shopCode}</Badge> },
+                  {
+                    key: 'loanAmount',
+                    header: 'Financed',
+                    align: 'right',
+                    sortable: true,
+                    render: (r: any) => <Money value={r.loanAmount} />,
+                    footer: (rs: any[]) => <Money value={rs.reduce((a, r) => a + r.loanAmount, 0)} />
+                  },
+                  {
+                    key: 'outstanding',
+                    header: 'Outstanding',
+                    align: 'right',
+                    sortable: true,
+                    render: (r: any) => <Money value={r.outstanding} blankZero />,
+                    footer: (rs: any[]) => <Money value={rs.reduce((a, r) => a + r.outstanding, 0)} />
+                  },
+                  ...(canProfit
+                    ? [
+                        {
+                          key: 'netIncome',
+                          header: 'Net income',
+                          align: 'right' as const,
+                          sortable: true,
+                          render: (r: any) => <Money value={r.netIncome} colored />,
+                          footer: (rs: any[]) => <Money value={rs.reduce((a, r) => a + r.netIncome, 0)} colored />
+                        }
+                      ]
+                    : []),
+                  {
+                    key: 'overdueCount',
+                    header: 'Overdue',
+                    align: 'right',
+                    render: (r: any) =>
+                      r.overdueCount > 0 ? <Badge variant="danger">{r.overdueCount}</Badge> : <span className="text-muted-foreground">—</span>
+                  },
+                  {
+                    key: 'status',
+                    header: 'Status',
+                    render: (r: any) => (
+                      <Badge variant={r.status === 'ACTIVE' ? 'info' : r.status === 'CLOSED' ? 'success' : 'secondary'}>
+                        {r.status}
+                      </Badge>
+                    )
+                  }
+                ]}
+              />
+            </>
+          )}
         </TabsContent>
 
         {/* ----------------------------------------------------------- gst */}
