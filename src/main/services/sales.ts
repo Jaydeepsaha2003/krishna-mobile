@@ -769,3 +769,40 @@ export async function cancelSale(saleId: string, reason: string) {
     shopId: sale.shop_id
   })
 }
+
+/**
+ * Permanently removes a bill (for a mistaken entry). Everything it moved is
+ * reversed: stock goes back on the shelf and the sale row is deleted, which
+ * cascades its line items and payments. An audit entry is written first so the
+ * deletion itself is always traceable even though the bill row is gone.
+ */
+export async function deleteSale(saleId: string, reason?: string) {
+  requirePermission('sale.manage')
+  const { companyId } = requireCompany()
+  const sale = await one<any>('SELECT * FROM sales WHERE id = ? AND company_id = ?', [
+    saleId,
+    companyId
+  ])
+  if (!sale) throw new AppError('Sale not found.', 'NOT_FOUND')
+
+  await logAudit({
+    action: 'sale.delete',
+    entity: 'sale',
+    entityId: saleId,
+    summary: `Deleted ${sale.invoice_no} (₹${round2(num(sale.total))})${reason?.trim() ? ` — ${reason.trim()}` : ''}`,
+    shopId: sale.shop_id
+  })
+
+  const ts = nowIso()
+  await tx(async (t) => {
+    // Return every unit this bill sold back to the shelf (stock_units.sale_id
+    // has no FK cascade, so it must be cleared by hand).
+    await t.run(
+      `UPDATE stock_units SET status = 'in_stock', sale_id = NULL, sale_item_id = NULL,
+              sold_at = NULL, updated_at = ? WHERE sale_id = ?`,
+      [ts, saleId]
+    )
+    // Deleting the sale cascades sale_items and payments (ON DELETE CASCADE).
+    await t.run('DELETE FROM sales WHERE id = ?', [saleId])
+  })
+}

@@ -104,14 +104,18 @@ export function NewPurchasePage() {
   const updateLine = (key: string, patch: Partial<LineDraft>) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
 
-  const setQty = (key: string, qty: number) => {
-    const safe = Math.max(1, Math.min(200, qty))
+  // Accepts the raw input string so the box can be cleared / retyped. 0 (empty)
+  // is allowed while typing; it's clamped up to 1 on blur. The unit rows track
+  // the quantity so IMEIs can be entered per unit.
+  const setQty = (key: string, raw: string) => {
+    const parsed = Math.floor(Number(raw))
+    const q = raw === '' || !Number.isFinite(parsed) ? 0 : Math.min(200, Math.max(0, parsed))
     setLines((ls) =>
       ls.map((l) => {
         if (l.key !== key) return l
         const units = [...l.units]
-        while (units.length < safe) units.push(emptyUnit())
-        return { ...l, qty: safe, units: units.slice(0, safe) }
+        while (units.length < q) units.push(emptyUnit())
+        return { ...l, qty: q, units: units.slice(0, q) }
       })
     )
   }
@@ -338,8 +342,9 @@ export function NewPurchasePage() {
                           type="number"
                           min={1}
                           max={200}
-                          value={line.qty}
-                          onChange={(e) => setQty(line.key, Number(e.target.value))}
+                          value={line.qty === 0 ? '' : line.qty}
+                          onChange={(e) => setQty(line.key, e.target.value)}
+                          onBlur={() => line.qty < 1 && setQty(line.key, '1')}
                           className="text-right tnum"
                         />
                       </Field>

@@ -2,15 +2,16 @@ import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Download, Plus, Search, Truck, Wallet } from 'lucide-react'
+import { Download, Plus, Search, Trash2, Truck, Wallet } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useCsvExport, useDateRange, useDebounced, useScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { useHotkey } from '@/lib/hotkeys'
 import { formatDate, money } from '@/lib/utils'
-import { Badge, Button, Card, CardContent, Field, Input } from '@/components/ui/base'
+import { Badge, Button, Card, CardContent, Field, Input, Textarea } from '@/components/ui/base'
 import { DataTable } from '@/components/ui/data-table'
 import {
+  ConfirmDialog,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -37,6 +38,8 @@ export function PurchasesPage() {
   const [payFor, setPayFor] = React.useState<any>(null)
   const [payAmount, setPayAmount] = React.useState<number | ''>('')
   const [payMode, setPayMode] = React.useState('Cash')
+  const [deleteFor, setDeleteFor] = React.useState<any>(null)
+  const [deleteReason, setDeleteReason] = React.useState('')
 
   const debounced = useDebounced(search, 250)
   const searchRef = React.useRef<HTMLInputElement>(null)
@@ -85,6 +88,22 @@ export function PurchasesPage() {
       toast.success(`${money(Number(payAmount))} paid to ${payFor.supplierName ?? 'supplier'}`)
       setPayFor(null)
       void qc.invalidateQueries({ queryKey: ['purchases'] })
+    } catch (err: any) {
+      toast.error(err.message)
+    }
+  }
+
+  const doDelete = async () => {
+    try {
+      await api.purchases.remove(deleteFor.id, deleteReason)
+      toast.success(`${deleteFor.invoiceNo} deleted — its stock was removed`)
+      setDeleteFor(null)
+      setDeleteReason('')
+      setDetailId(null)
+      void qc.invalidateQueries({ queryKey: ['purchases'] })
+      void qc.invalidateQueries({ queryKey: ['stock'] })
+      void qc.invalidateQueries({ queryKey: ['stock-summary'] })
+      void qc.invalidateQueries({ queryKey: ['dash'] })
     } catch (err: any) {
       toast.error(err.message)
     }
@@ -211,10 +230,10 @@ export function PurchasesPage() {
           {
             key: 'actions',
             header: '',
-            width: '100px',
-            render: (r: any) =>
-              r.dueAmount > 0.5 && session.can('payment.manage') ? (
-                <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+            width: '150px',
+            render: (r: any) => (
+              <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                {r.dueAmount > 0.5 && session.can('payment.manage') && (
                   <Button
                     size="xs"
                     variant="outline"
@@ -225,8 +244,23 @@ export function PurchasesPage() {
                   >
                     <Wallet /> Pay
                   </Button>
-                </div>
-              ) : null
+                )}
+                {session.can('purchase.manage') && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Delete bill"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => {
+                      setDeleteReason('')
+                      setDeleteFor(r)
+                    }}
+                  >
+                    <Trash2 />
+                  </Button>
+                )}
+              </div>
+            )
           }
         ]}
       />
@@ -283,6 +317,21 @@ export function PurchasesPage() {
                   </CardContent>
                 </Card>
               </div>
+
+              {session.can('purchase.manage') && (
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    className="text-destructive hover:bg-destructive/10"
+                    onClick={() => {
+                      setDeleteReason('')
+                      setDeleteFor({ id: detail.data.purchase.id, invoiceNo: detail.data.purchase.invoice_no })
+                    }}
+                  >
+                    <Trash2 /> Delete this bill
+                  </Button>
+                </DialogFooter>
+              )}
             </>
           )}
         </DialogContent>
@@ -321,6 +370,25 @@ export function PurchasesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* -------------------------------------------------------- delete */}
+      <ConfirmDialog
+        open={Boolean(deleteFor)}
+        onOpenChange={(v) => !v && setDeleteFor(null)}
+        title={`Delete ${deleteFor?.invoiceNo}?`}
+        description="The bill is removed permanently and the stock it brought in is deleted. This is only allowed if none of those items have been sold or transferred yet. The deletion is written to the audit trail."
+        confirmLabel="Delete bill"
+        destructive
+        onConfirm={doDelete}
+      >
+        <Field label="Reason" hint="Kept in the audit trail">
+          <Textarea
+            value={deleteReason}
+            onChange={(e) => setDeleteReason(e.target.value)}
+            placeholder="e.g. duplicate bill / entered against the wrong shop"
+          />
+        </Field>
+      </ConfirmDialog>
     </div>
   )
 }

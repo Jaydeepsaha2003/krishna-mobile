@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeftRight, Boxes, Download, PackageSearch, Search, Wrench } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Boxes, Download, Minus, PackageSearch, Plus, Search, Wrench } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useBrands, useCsvExport, useDebounced, useReconReasons, useScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
@@ -22,6 +22,8 @@ import {
 import { SimpleSelect, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/form'
 import { Money, PageHeader, StatCard, StockStatusBadge, Toolbar } from '@/components/ui/misc'
 import { TransferDialog } from '@/features/transfers/TransferDialog'
+import { ManualStockDialog } from './ManualStockDialog'
+import { NewTransferDialog } from '@/features/transfers/NewTransferDialog'
 
 export function StockPage() {
   const qc = useQueryClient()
@@ -39,6 +41,8 @@ export function StockPage() {
   const [brandId, setBrandId] = React.useState('all')
   const [selected, setSelected] = React.useState<string[]>([])
   const [transferOpen, setTransferOpen] = React.useState(false)
+  const [newTransferOpen, setNewTransferOpen] = React.useState(false)
+  const [manualMode, setManualMode] = React.useState<'add' | 'remove' | null>(null)
   const [adjustFor, setAdjustFor] = React.useState<any>(null)
   const [adjustStatus, setAdjustStatus] = React.useState('damaged')
   const [adjustReason, setAdjustReason] = React.useState('DAMAGE')
@@ -123,6 +127,26 @@ export function StockPage() {
               <Button size="sm" onClick={() => setTransferOpen(true)}>
                 <ArrowLeftRight /> Transfer {selected.length}
               </Button>
+            )}
+            {selected.length === 0 && session.can('transfer.manage') && shops.length > 1 && (
+              <Button variant="outline" size="sm" onClick={() => setNewTransferOpen(true)}>
+                <ArrowLeftRight /> Transfer stock
+              </Button>
+            )}
+            {session.can('stock.adjust') && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:bg-destructive/10"
+                  onClick={() => setManualMode('remove')}
+                >
+                  <Minus /> Remove stock
+                </Button>
+                <Button size="sm" onClick={() => setManualMode('add')}>
+                  <Plus /> Add stock
+                </Button>
+              </>
             )}
             <Button
               variant="outline"
@@ -398,6 +422,15 @@ export function StockPage() {
           />
         </TabsContent>
       </Tabs>
+
+      <ManualStockDialog
+        open={manualMode !== null}
+        onOpenChange={(v) => !v && setManualMode(null)}
+        mode={manualMode ?? 'add'}
+        shopId={scope === 'all' ? shopId ?? undefined : scope}
+      />
+
+      <NewTransferDialog open={newTransferOpen} onOpenChange={setNewTransferOpen} />
 
       <TransferDialog
         open={transferOpen}

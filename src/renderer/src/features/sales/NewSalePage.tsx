@@ -446,11 +446,15 @@ export function NewSalePage() {
     data: u
   }))
 
+  // Only SKUs with stock at this shop are listed (the query filters
+  // available > 0), each showing its SKU and how many are on hand.
   const accessoryOptions: ComboOption[] = (accessories.data ?? []).map((m: any) => ({
     value: m.modelId,
     label: `${m.brandName} ${m.modelName}`,
-    hint: `${m.available} in stock · ${money(m.salePrice)}`,
-    meta: <Badge variant="secondary">{m.available}</Badge>,
+    hint: `${m.sku} · ${money(m.salePrice)}`,
+    meta: (
+      <Badge variant={m.available <= 2 ? 'warning' : 'success'}>{m.available} in stock</Badge>
+    ),
     group: m.brandName,
     keywords: [m.sku].filter(Boolean),
     data: m
@@ -649,8 +653,8 @@ export function NewSalePage() {
                   </Field>
                 </div>
                 <Field
-                  label="Accessories & parts — pick, then type the quantity"
-                  hint="Chargers, cables, covers… only the quantity you have in stock can be added"
+                  label={mode === 'repair' ? 'Pick a part from stock — then type the quantity' : 'Accessories & parts — pick, then type the quantity'}
+                  hint="Only items in stock at this shop are listed, with the quantity available"
                 >
                   <Combobox
                     value={null}
@@ -658,9 +662,9 @@ export function NewSalePage() {
                     options={accessoryOptions}
                     onSearchChange={setAccSearch}
                     loading={accessories.isFetching}
-                    placeholder={`${accessories.data?.length ?? 0} accessory item(s) in stock`}
-                    searchPlaceholder="Charger, cable, cover…"
-                    emptyText="No non-IMEI stock matches — add it under Purchases first"
+                    placeholder={`${accessories.data?.length ?? 0} item(s) in stock`}
+                    searchPlaceholder="Name or SKU…"
+                    emptyText="Nothing in stock — add it under Purchases or Stock → Add stock"
                   />
                 </Field>
               </CardContent>

@@ -31,7 +31,8 @@ const EMPTY = {
   mrp: '',
   lowStockAlert: '2',
   warrantyMonths: '12',
-  trackImei: true
+  // Default OFF — most items are added/sold by quantity. Turn on per handset model.
+  trackImei: false
 }
 
 export function ModelFormDialog({
@@ -146,12 +147,13 @@ export function ModelFormDialog({
             />
           </Field>
 
-          <Field label="Model name" required>
+          <Field label="Model name" required hint="Saved in capitals">
             <Input
               autoFocus
               value={draft.name}
-              onChange={(e) => set('name', e.target.value)}
-              placeholder="e.g. Galaxy M14 5G"
+              onChange={(e) => set('name', e.target.value.toUpperCase())}
+              placeholder="e.g. GALAXY M14 5G"
+              className="uppercase"
             />
           </Field>
 
@@ -172,19 +174,29 @@ export function ModelFormDialog({
           </Field>
 
           <Field label="RAM">
-            <Input value={draft.ram} onChange={(e) => set('ram', e.target.value)} placeholder="6GB" />
+            <Input
+              value={draft.ram}
+              onChange={(e) => set('ram', e.target.value.toUpperCase())}
+              placeholder="6GB"
+              className="uppercase"
+            />
           </Field>
 
           <Field label="Storage">
             <Input
               value={draft.storage}
-              onChange={(e) => set('storage', e.target.value)}
+              onChange={(e) => set('storage', e.target.value.toUpperCase())}
               placeholder="128GB"
+              className="uppercase"
             />
           </Field>
 
           <Field label="Colour" hint="Default colour; each unit can override it">
-            <Input value={draft.color} onChange={(e) => set('color', e.target.value)} />
+            <Input
+              value={draft.color}
+              onChange={(e) => set('color', e.target.value.toUpperCase())}
+              className="uppercase"
+            />
           </Field>
 
           <Field label="HSN code">

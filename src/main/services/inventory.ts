@@ -164,11 +164,20 @@ export async function availableStock(shopId: string, search?: string, limit = 50
 }
 
 /**
- * Non-IMEI models (accessories, chargers…) that have stock at a shop, with the
- * available quantity. Powers the "sell by quantity" picker so the cashier picks
- * the item once and types how many — capped at what's actually in stock.
+ * Models that actually have stock at a shop, with the available quantity.
+ * Powers the "pick from stock, then type a quantity" picker: only SKUs with
+ * `available > 0` are returned, so nothing out of stock can be picked.
+ *
+ * Defaults to non-IMEI items (accessories sold by quantity). Pass
+ * `includeImei` to list serialised models too — used by stock transfers, where
+ * quantity-picking is valid for every kind of item.
  */
-export async function availableModels(shopId: string, search?: string, limit = 50) {
+export async function availableModels(
+  shopId: string,
+  search?: string,
+  limit = 50,
+  includeImei = false
+) {
   requirePermission('stock.view')
   const { companyId } = requireCompany()
   // Param order matches the query: shopId (JOIN), companyId (WHERE), search x3, limit.
@@ -181,14 +190,14 @@ export async function availableModels(shopId: string, search?: string, limit = 5
   }
   const rows = await all<any>(
     `SELECT m.id AS model_id, m.name AS model_name, m.sku, m.default_price, m.gst_rate,
-            b.name AS brand_name, COUNT(su.id) AS available,
+            m.track_imei, b.name AS brand_name, COUNT(su.id) AS available,
             COALESCE(AVG(su.cost_price), 0) AS avg_cost,
             COALESCE(NULLIF(MAX(su.sale_price), 0), m.default_price) AS sale_price
        FROM models m
        JOIN brands b ON b.id = m.brand_id
        JOIN stock_units su
               ON su.model_id = m.id AND su.status = 'in_stock' AND su.current_shop_id = ?
-      WHERE m.company_id = ? AND m.is_active = 1 AND m.track_imei = 0 ${extra}
+      WHERE m.company_id = ? AND m.is_active = 1 ${includeImei ? '' : 'AND m.track_imei = 0'} ${extra}
       GROUP BY m.id
       HAVING available > 0
       ORDER BY b.name, m.name
@@ -200,6 +209,7 @@ export async function availableModels(shopId: string, search?: string, limit = 5
     brandName: r.brand_name,
     modelName: r.model_name,
     sku: r.sku,
+    trackImei: !!r.track_imei,
     available: r.available ?? 0,
     salePrice: round2(num(r.sale_price)),
     gstRate: num(r.gst_rate, 18),
@@ -600,6 +610,54 @@ export async function getPurchase(id: string) {
   return { purchase, items, units: units.map(shapeUnit), payments }
 }
 
+/**
+ * Permanently removes a purchase bill (a mistaken entry). Only allowed while
+ * none of its units have moved on: if any unit has been sold, transferred, or
+ * otherwise changed from in-stock, the delete is refused so we never orphan a
+ * sale or transfer. Otherwise the units it created are removed and the purchase
+ * row is deleted, cascading its items and payments.
+ */
+export async function deletePurchase(purchaseId: string, reason?: string) {
+  requirePermission('purchase.manage')
+  const { companyId } = requireCompany()
+  const purchase = await one<any>('SELECT * FROM purchases WHERE id = ? AND company_id = ?', [
+    purchaseId,
+    companyId
+  ])
+  if (!purchase) throw new AppError('Purchase not found.', 'NOT_FOUND')
+
+  const blocked =
+    (await scalar<number>(
+      `SELECT COUNT(*) FROM stock_units su
+        WHERE su.purchase_id = ?
+          AND (su.status <> 'in_stock'
+               OR EXISTS (SELECT 1 FROM sale_items si WHERE si.stock_unit_id = su.id)
+               OR EXISTS (SELECT 1 FROM transfer_items ti WHERE ti.stock_unit_id = su.id))`,
+      [purchaseId]
+    )) ?? 0
+  if (blocked > 0)
+    throw new AppError(
+      `Cannot delete: ${blocked} item(s) from this bill have already been sold or transferred. Reverse those first.`,
+      'HAS_MOVEMENT'
+    )
+
+  await logAudit({
+    action: 'purchase.delete',
+    entity: 'purchase',
+    entityId: purchaseId,
+    summary: `Deleted ${purchase.invoice_no} (₹${round2(num(purchase.total))})${reason?.trim() ? ` — ${reason.trim()}` : ''}`,
+    shopId: purchase.shop_id
+  })
+
+  await tx(async (t) => {
+    // Remove the units this bill created (they reference the purchase, so they
+    // must go before the purchase row can be deleted with foreign keys on).
+    await t.run('DELETE FROM stock_units WHERE purchase_id = ?', [purchaseId])
+    // Deleting the purchase cascades purchase_items and payments.
+    await t.run('DELETE FROM purchases WHERE id = ?', [purchaseId])
+  })
+}
+
 /* ========================================================================== */
 /*  TRANSFERS  (Shop 1 -> Shop 2)                                             */
 /* ========================================================================== */
@@ -613,6 +671,64 @@ export interface TransferInput {
   transferPrices?: Record<string, number>
   notes?: string
   autoReceive?: boolean
+}
+
+/**
+ * Transfer by quantity instead of by hand-picked unit: for each model, take the
+ * oldest in-stock units at the sending shop (FIFO) and hand them to
+ * createTransfer, which does all the validation and bookkeeping. This is what
+ * the "New transfer" screen uses — the cashier picks a product and a quantity
+ * rather than ticking individual IMEIs.
+ */
+export async function createTransferByModel(input: {
+  fromShopId: string
+  toShopId: string
+  transferDate?: string
+  lines: Array<{ modelId: string; qty: number }>
+  notes?: string
+  autoReceive?: boolean
+}) {
+  requirePermission('transfer.manage')
+  const { companyId } = requireCompany()
+
+  if (input.fromShopId === input.toShopId)
+    throw new AppError('Source and destination shops must be different.', 'VALIDATION')
+  if (!input.lines?.length) throw new AppError('Add at least one product to transfer.', 'VALIDATION')
+
+  const stockUnitIds: string[] = []
+  for (const line of input.lines) {
+    const qty = Math.floor(num(line.qty))
+    if (qty < 1) continue
+    const model = await one<any>(
+      `SELECT m.name, b.name AS brand_name FROM models m JOIN brands b ON b.id = m.brand_id
+        WHERE m.id = ? AND m.company_id = ?`,
+      [line.modelId, companyId]
+    )
+    const label = model ? `${model.brand_name} ${model.name}` : 'item'
+    const avail = await all<{ id: string }>(
+      `SELECT id FROM stock_units
+        WHERE company_id = ? AND model_id = ? AND current_shop_id = ? AND status = 'in_stock'
+        ORDER BY added_at LIMIT ?`,
+      [companyId, line.modelId, input.fromShopId, qty]
+    )
+    if (avail.length < qty)
+      throw new AppError(
+        `Only ${avail.length} × ${label} in stock at the sending shop — cannot transfer ${qty}.`,
+        'NO_STOCK'
+      )
+    stockUnitIds.push(...avail.map((u) => u.id))
+  }
+
+  if (!stockUnitIds.length) throw new AppError('Enter a quantity to transfer.', 'VALIDATION')
+
+  return createTransfer({
+    fromShopId: input.fromShopId,
+    toShopId: input.toShopId,
+    transferDate: input.transferDate ?? today(),
+    stockUnitIds,
+    notes: input.notes,
+    autoReceive: input.autoReceive
+  })
 }
 
 export async function createTransfer(input: TransferInput) {
@@ -890,6 +1006,212 @@ export async function getTransfer(id: string) {
     [id]
   )
   return { transfer, items }
+}
+
+/* ========================================================================== */
+/*  MANUAL STOCK IN / OUT  (no supplier bill)                                 */
+/* ========================================================================== */
+
+/**
+ * Adds stock by hand, without a purchase bill — for opening stock, a local
+ * cash buy, or anything that never came through a supplier invoice.
+ *
+ * Prices are entered GST-INCLUSIVE (what was actually paid / will be charged),
+ * matching how the rest of the app treats money. `qty` units are created; for
+ * an IMEI-tracked model supply one IMEI per unit.
+ */
+export async function addManualStock(input: {
+  shopId: string
+  modelId: string
+  qty: number
+  costPrice: number
+  salePrice?: number
+  gstRate?: number
+  condition?: string
+  color?: string
+  imeis?: string[]
+  reasonCode?: string
+  note?: string
+}) {
+  requirePermission('stock.adjust')
+  const { companyId } = requireCompany()
+  const session = requireSession()
+
+  if (!input.shopId) throw new AppError('Choose the shop receiving this stock.', 'VALIDATION')
+  const model = await one<any>(
+    `SELECT m.*, b.name AS brand_name FROM models m JOIN brands b ON b.id = m.brand_id
+      WHERE m.id = ? AND m.company_id = ?`,
+    [input.modelId, companyId]
+  )
+  if (!model) throw new AppError('Choose the product being added.', 'VALIDATION')
+
+  const qty = Math.floor(num(input.qty))
+  if (qty < 1 || qty > 500) throw new AppError('Quantity must be between 1 and 500.', 'VALIDATION')
+
+  const costPrice = round2(num(input.costPrice))
+  if (costPrice < 0) throw new AppError('Cost price cannot be negative.', 'VALIDATION')
+  const salePrice = round2(num(input.salePrice))
+
+  // IMEI-tracked models need one valid, unused IMEI per unit.
+  const imeis = (input.imeis ?? []).map((v) => normalizeImei(v ?? '')).filter(Boolean)
+  if (model.track_imei) {
+    if (imeis.length !== qty)
+      throw new AppError(`${model.name}: enter ${qty} IMEI number(s) — got ${imeis.length}.`, 'VALIDATION')
+    const dup = imeis.find((v, i) => imeis.indexOf(v) !== i)
+    if (dup) throw new AppError(`IMEI ${dup} is entered twice.`, 'DUPLICATE')
+    for (const imei of imeis) {
+      if (imei.length !== 15) throw new AppError('Every IMEI must be 15 digits.', 'VALIDATION')
+      const existing = await one<{ status: string }>(
+        'SELECT status FROM stock_units WHERE company_id = ? AND imei1 = ?',
+        [companyId, imei]
+      )
+      if (existing)
+        throw new AppError(`IMEI ${imei} is already in stock (${existing.status}).`, 'DUPLICATE')
+    }
+  }
+
+  const ts = nowIso()
+  const label = `${model.brand_name} ${model.name}`
+
+  await tx(async (t) => {
+    for (let i = 0; i < qty; i++) {
+      const unitId = newId()
+      await t.run(
+        `INSERT INTO stock_units (id, company_id, model_id, imei1, color, condition, cost_price,
+           sale_price, status, current_shop_id, origin_shop_id, warranty_months, notes,
+           added_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?, 'in_stock', ?,?,?,?,?,?)`,
+        [
+          unitId,
+          companyId,
+          input.modelId,
+          nullify(model.track_imei ? imeis[i] : null),
+          nullify(input.color ?? model.color),
+          nullify(input.condition) ?? 'New',
+          costPrice,
+          salePrice,
+          input.shopId,
+          input.shopId,
+          num(model.warranty_months, 12),
+          nullify(input.note ? `Added manually: ${input.note}` : 'Added manually (no purchase bill)'),
+          ts,
+          ts
+        ]
+      )
+      await t.run(
+        `INSERT INTO stock_adjustments (id, company_id, shop_id, stock_unit_id, model_id, qty,
+           from_status, to_status, reason_code, reason_note, value_impact, created_by, created_at)
+         VALUES (?,?,?,?,?,1,NULL,'in_stock',?,?,?,?,?)`,
+        [
+          newId(),
+          companyId,
+          input.shopId,
+          unitId,
+          input.modelId,
+          nullify(input.reasonCode) ?? 'UNRECORDED_PURCHASE',
+          nullify(input.note),
+          costPrice,
+          session.user.id,
+          ts
+        ]
+      )
+    }
+  })
+
+  await logAudit({
+    action: 'stock.addManual',
+    entity: 'stock_unit',
+    summary: `Added ${qty} × ${label} manually at ₹${costPrice} each${input.note ? ` — ${input.note}` : ''}`,
+    shopId: input.shopId
+  })
+
+  return { added: qty, label }
+}
+
+/**
+ * Removes stock by hand — damage, loss, personal use, a sale that never went
+ * through the till. Takes the oldest in-stock units of the model (FIFO) and
+ * moves them out of `in_stock`, recording an adjustment per unit. Nothing is
+ * deleted, so the history stays auditable.
+ */
+export async function removeManualStock(input: {
+  shopId: string
+  modelId: string
+  qty: number
+  toStatus?: string
+  reasonCode: string
+  note?: string
+}) {
+  requirePermission('stock.adjust')
+  const { companyId } = requireCompany()
+  const session = requireSession()
+
+  const model = await one<any>(
+    `SELECT m.*, b.name AS brand_name FROM models m JOIN brands b ON b.id = m.brand_id
+      WHERE m.id = ? AND m.company_id = ?`,
+    [input.modelId, companyId]
+  )
+  if (!model) throw new AppError('Choose the product being removed.', 'VALIDATION')
+
+  const qty = Math.floor(num(input.qty))
+  if (qty < 1) throw new AppError('Quantity must be at least 1.', 'VALIDATION')
+  if (!input.reasonCode) throw new AppError('Choose a reason for removing this stock.', 'VALIDATION')
+
+  const toStatus = input.toStatus || 'damaged'
+  if (toStatus === 'sold')
+    throw new AppError('Use a sale to mark stock sold.', 'VALIDATION')
+
+  const ts = nowIso()
+  const label = `${model.brand_name} ${model.name}`
+
+  await tx(async (t) => {
+    const avail = await t.all<{ id: string; cost_price: number }>(
+      `SELECT id, cost_price FROM stock_units
+        WHERE company_id = ? AND model_id = ? AND current_shop_id = ? AND status = 'in_stock'
+        ORDER BY added_at LIMIT ?`,
+      [companyId, input.modelId, input.shopId, qty]
+    )
+    if (avail.length < qty)
+      throw new AppError(
+        `Only ${avail.length} × ${label} in stock at this shop — cannot remove ${qty}.`,
+        'NO_STOCK'
+      )
+
+    for (const u of avail) {
+      await t.run('UPDATE stock_units SET status = ?, updated_at = ? WHERE id = ?', [
+        toStatus,
+        ts,
+        u.id
+      ])
+      await t.run(
+        `INSERT INTO stock_adjustments (id, company_id, shop_id, stock_unit_id, model_id, qty,
+           from_status, to_status, reason_code, reason_note, value_impact, created_by, created_at)
+         VALUES (?,?,?,?,?,1,'in_stock',?,?,?,?,?,?)`,
+        [
+          newId(),
+          companyId,
+          input.shopId,
+          u.id,
+          input.modelId,
+          toStatus,
+          input.reasonCode,
+          nullify(input.note),
+          -num(u.cost_price),
+          session.user.id,
+          ts
+        ]
+      )
+    }
+  })
+
+  await logAudit({
+    action: 'stock.removeManual',
+    entity: 'stock_unit',
+    summary: `Removed ${qty} × ${label} (${toStatus})${input.note ? ` — ${input.note}` : ''}`,
+    shopId: input.shopId
+  })
+
+  return { removed: qty, label }
 }
 
 /* ========================================================================== */

@@ -11,6 +11,7 @@ import {
   Receipt,
   Search,
   ShoppingCart,
+  Trash2,
   Wallet
 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -51,6 +52,8 @@ export function SalesPage() {
   const [payFor, setPayFor] = React.useState<any>(null)
   const [cancelFor, setCancelFor] = React.useState<any>(null)
   const [cancelReason, setCancelReason] = React.useState('')
+  const [deleteFor, setDeleteFor] = React.useState<any>(null)
+  const [deleteReason, setDeleteReason] = React.useState('')
 
   const debouncedSearch = useDebounced(search, 250)
   const searchRef = React.useRef<HTMLInputElement>(null)
@@ -135,6 +138,21 @@ export function SalesPage() {
       void qc.invalidateQueries({ queryKey: ['sales'] })
       void qc.invalidateQueries({ queryKey: ['stock'] })
       void qc.invalidateQueries({ queryKey: ['stock-summary'] })
+    } catch (err: any) {
+      toast.error(err.message)
+    }
+  }
+
+  const doDelete = async () => {
+    try {
+      await api.sales.remove(deleteFor.id, deleteReason)
+      toast.success(`${deleteFor.invoiceNo} deleted — stock returned to the shelf`)
+      setDeleteFor(null)
+      setDeleteReason('')
+      void qc.invalidateQueries({ queryKey: ['sales'] })
+      void qc.invalidateQueries({ queryKey: ['stock'] })
+      void qc.invalidateQueries({ queryKey: ['stock-summary'] })
+      void qc.invalidateQueries({ queryKey: ['dash'] })
     } catch (err: any) {
       toast.error(err.message)
     }
@@ -315,6 +333,20 @@ export function SalesPage() {
                     <Ban />
                   </Button>
                 )}
+                {session.can('sale.manage') && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Delete bill"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => {
+                      setDeleteReason('')
+                      setDeleteFor(r)
+                    }}
+                  >
+                    <Trash2 />
+                  </Button>
+                )}
               </div>
             )
           }
@@ -466,6 +498,24 @@ export function SalesPage() {
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value)}
             placeholder="e.g. wrong IMEI billed, customer returned the phone"
+          />
+        </Field>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteFor)}
+        onOpenChange={(v) => !v && setDeleteFor(null)}
+        title={`Delete ${deleteFor?.invoiceNo}?`}
+        description="The bill is removed permanently and every handset on it goes back into stock. Use this only for a mistaken entry — to void a genuine sale, use Cancel instead. The deletion is written to the audit trail."
+        confirmLabel="Delete bill"
+        destructive
+        onConfirm={doDelete}
+      >
+        <Field label="Reason" hint="Kept in the audit trail">
+          <Textarea
+            value={deleteReason}
+            onChange={(e) => setDeleteReason(e.target.value)}
+            placeholder="e.g. duplicate bill entered by mistake"
           />
         </Field>
       </ConfirmDialog>

@@ -110,17 +110,21 @@ const handlers: Record<string, Handler> = {
   'stock:byImei': ({ imei }: any) => inventory.findByImei(imei),
   'stock:available': ({ shopId, search, limit }: any) =>
     inventory.availableStock(shopId, search, limit),
-  'stock:availableModels': ({ shopId, search, limit }: any) =>
-    inventory.availableModels(shopId, search, limit),
+  'stock:availableModels': ({ shopId, search, limit, includeImei }: any) =>
+    inventory.availableModels(shopId, search, limit, includeImei),
   'stock:summary': ({ shopId }: any = {}) => inventory.stockSummary(shopId),
   'stock:adjust': (input: any) => inventory.adjustStock(input),
+  'stock:addManual': (input: any) => inventory.addManualStock(input),
+  'stock:removeManual': (input: any) => inventory.removeManualStock(input),
   'stock:adjustments': (params: any = {}) => inventory.listAdjustments(params),
 
   'purchases:create': (input: any) => inventory.createPurchase(input),
   'purchases:list': (params: any = {}) => inventory.listPurchases(params),
   'purchases:get': ({ id }: any) => inventory.getPurchase(id),
+  'purchases:delete': ({ purchaseId, reason }: any) => inventory.deletePurchase(purchaseId, reason),
 
   'transfers:create': (input: any) => inventory.createTransfer(input),
+  'transfers:createByModel': (input: any) => inventory.createTransferByModel(input),
   'transfers:receive': ({ transferId, stockUnitIds }: any) =>
     inventory.receiveTransfer(transferId, stockUnitIds),
   'transfers:cancel': ({ transferId, reason }: any) =>
@@ -133,6 +137,7 @@ const handlers: Record<string, Handler> = {
   'sales:list': (filter: any = {}) => sales.listSales(filter),
   'sales:get': ({ id }: any) => sales.getSale(id),
   'sales:cancel': ({ saleId, reason }: any) => sales.cancelSale(saleId, reason),
+  'sales:delete': ({ saleId, reason }: any) => sales.deleteSale(saleId, reason),
   'sales:recordPayment': (input: any) => sales.recordPayment(input),
   'sales:creditBook': (params: any = {}) => sales.creditBook(params),
   'purchases:recordPayment': (input: any) => sales.recordSupplierPayment(input),

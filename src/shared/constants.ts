@@ -145,8 +145,9 @@ export const ROLE_PERMISSIONS: Record<Exclude<Role, 'custom'>, Permission[]> = {
     'loan.manage',
     'loan.repayment',
     'loan.foreclose',
-    'report.view',
-    'report.profit'
+    'report.view'
+    // NOTE: 'report.profit' is intentionally NOT granted to managers — cost
+    // price, margin and profit figures are visible to admins only.
   ],
   cashier: [
     'company.view',

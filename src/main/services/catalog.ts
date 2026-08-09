@@ -27,7 +27,10 @@ export async function listBrands(includeInactive = false) {
 export async function saveBrand(input: { id?: string; name: string; isActive?: boolean }) {
   requirePermission('product.manage')
   const { companyId } = requireCompany()
-  const name = (input.name ?? '').trim()
+  // Catalogue names are stored uppercase so the list reads consistently no
+  // matter who typed it in. Normalising here covers every entry point — the
+  // form, the quick-add on the purchase/sale screens, and the importer.
+  const name = (input.name ?? '').trim().toUpperCase()
   if (name.length < 1) throw new AppError('Brand name is required.', 'VALIDATION')
 
   const clash = await one<{ id: string }>(
@@ -155,7 +158,8 @@ export async function saveModel(input: ModelInput) {
   requirePermission('product.manage')
   const { companyId } = requireCompany()
 
-  const name = (input.name ?? '').trim()
+  // Stored uppercase, same as brands — see saveBrand.
+  const name = (input.name ?? '').trim().toUpperCase()
   if (name.length < 1) throw new AppError('Model name is required.', 'VALIDATION')
   const brand = await one<{ name: string }>('SELECT name FROM brands WHERE id = ?', [input.brandId])
   if (!brand) throw new AppError('Please choose a brand.', 'VALIDATION')
@@ -167,16 +171,21 @@ export async function saveModel(input: ModelInput) {
   )
   if (clash) throw new AppError(`SKU "${sku}" already exists.`, 'DUPLICATE')
 
+  // Uppercase the free-text spec fields too, so a model reads uniformly
+  // wherever it is shown (e.g. "VIVO Y29 4+128 · BLACK"). `category` is left
+  // alone — it comes from a fixed dropdown and is matched elsewhere by value.
+  const upper = (v?: string) => nullify(v)?.toUpperCase() ?? null
+
   const ts = nowIso()
   const args = [
     input.brandId,
     name,
     sku,
     nullify(input.category) ?? 'Smartphone',
-    nullify(input.hsn),
-    nullify(input.ram),
-    nullify(input.storage),
-    nullify(input.color),
+    upper(input.hsn),
+    upper(input.ram),
+    upper(input.storage),
+    upper(input.color),
     num(input.gstRate, 18),
     num(input.defaultCost),
     num(input.defaultPrice),

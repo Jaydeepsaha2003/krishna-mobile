@@ -101,20 +101,24 @@ export const api = {
     byImei: (imei: string) => call('stock:byImei', { imei }),
     available: (shopId: string, search?: string, limit?: number) =>
       call('stock:available', { shopId, search, limit }),
-    availableModels: (shopId: string, search?: string, limit?: number) =>
-      call('stock:availableModels', { shopId, search, limit }),
+    availableModels: (shopId: string, search?: string, limit?: number, includeImei?: boolean) =>
+      call('stock:availableModels', { shopId, search, limit, includeImei }),
     summary: (shopId?: string) => call('stock:summary', { shopId }),
     adjust: (input: any) => call('stock:adjust', input),
+    addManual: (input: any) => call('stock:addManual', input),
+    removeManual: (input: any) => call('stock:removeManual', input),
     adjustments: (params: any = {}) => call('stock:adjustments', params)
   },
   purchases: {
     create: (input: any) => call('purchases:create', input),
     list: (params: any = {}) => call('purchases:list', params),
     get: (id: string) => call('purchases:get', { id }),
+    remove: (purchaseId: string, reason?: string) => call('purchases:delete', { purchaseId, reason }),
     recordPayment: (input: any) => call('purchases:recordPayment', input)
   },
   transfers: {
     create: (input: any) => call('transfers:create', input),
+    createByModel: (input: any) => call('transfers:createByModel', input),
     receive: (transferId: string, stockUnitIds?: string[]) =>
       call('transfers:receive', { transferId, stockUnitIds }),
     cancel: (transferId: string, reason: string) => call('transfers:cancel', { transferId, reason }),
@@ -126,6 +130,7 @@ export const api = {
     list: (filter: any = {}) => call('sales:list', filter),
     get: (id: string) => call('sales:get', { id }),
     cancel: (saleId: string, reason: string) => call('sales:cancel', { saleId, reason }),
+    remove: (saleId: string, reason?: string) => call('sales:delete', { saleId, reason }),
     recordPayment: (input: any) => call('sales:recordPayment', input),
     creditBook: (params: any = {}) => call('sales:creditBook', params)
   },

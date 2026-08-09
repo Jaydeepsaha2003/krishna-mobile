@@ -20,6 +20,7 @@ import {
 import { SimpleSelect, Tabs, TabsList, TabsTrigger } from '@/components/ui/form'
 import { DateRangePicker, Money, PageHeader, StatCard, Toolbar } from '@/components/ui/misc'
 import { TransferStatusBadge } from './TransferDialog'
+import { NewTransferDialog } from './NewTransferDialog'
 
 export function TransfersPage() {
   const qc = useQueryClient()
@@ -33,6 +34,7 @@ export function TransfersPage() {
   const [detailId, setDetailId] = React.useState<string | null>(null)
   const [cancelFor, setCancelFor] = React.useState<any>(null)
   const [cancelReason, setCancelReason] = React.useState('')
+  const [newOpen, setNewOpen] = React.useState(false)
 
   const transfers = useQuery({
     queryKey: ['transfers', companyId, scope, direction, status, range],
@@ -87,7 +89,15 @@ export function TransfersPage() {
     <div className="space-y-4">
       <PageHeader
         title="Stock transfers"
-        description="Moving handsets between your shops, with a confirmation step at the receiving end"
+        description="Moving stock between your shops, with a confirmation step at the receiving end"
+        actions={
+          session.can('transfer.manage') &&
+          shops.length > 1 && (
+            <Button size="sm" onClick={() => setNewOpen(true)}>
+              <ArrowLeftRight /> Transfer stock
+            </Button>
+          )
+        }
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -306,6 +316,8 @@ export function TransfersPage() {
           <Textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} />
         </Field>
       </ConfirmDialog>
+
+      <NewTransferDialog open={newOpen} onOpenChange={setNewOpen} />
     </div>
   )
 }

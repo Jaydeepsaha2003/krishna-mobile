@@ -312,13 +312,14 @@ export function CataloguePage() {
           <DialogHeader>
             <DialogTitle>{editingBrand ? 'Edit brand' : 'New brand'}</DialogTitle>
           </DialogHeader>
-          <Field label="Brand name" required>
+          <Field label="Brand name" required hint="Saved in capitals">
             <Input
               autoFocus
               value={brandName}
-              onChange={(e) => setBrandName(e.target.value)}
+              onChange={(e) => setBrandName(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === 'Enter' && void saveBrand()}
-              placeholder="e.g. Samsung"
+              placeholder="e.g. SAMSUNG"
+              className="uppercase"
             />
           </Field>
           <DialogFooter>
