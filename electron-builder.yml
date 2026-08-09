@@ -6,13 +6,21 @@ directories:
   buildResources: build
   output: release/${version}
 
+# Ship ONLY the bundled app (electron-vite compiles main/preload/renderer into
+# out/) plus package.json. electron-builder then adds just the *production*
+# dependencies from node_modules automatically. An exclusion-only list here used
+# to pull the ENTIRE node_modules — including devDependencies (electron, vite,
+# typescript, react, recharts…) — bloating app.asar to ~469 MB. An explicit
+# allowlist keeps app.asar to the built app + the 6 runtime deps (~15 MB).
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintrc,.eslintignore,.prettierrc,.prettierignore,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml,package-lock.json}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,tailwind.config.js,postcss.config.js}'
+  - out/**
+  - package.json
+  - '!**/*.{map,md,ts}'
+  - '!**/*.d.ts'
+
+# Only ship the English locale; Electron bundles ~50 locale packs by default.
+electronLanguages:
+  - en-US
 
 # The bundled .env ships INSIDE the installer so the shop owner never configures anything.
 extraResources:
