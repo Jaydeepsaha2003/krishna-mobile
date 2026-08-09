@@ -212,7 +212,7 @@ export async function availableModels(
     trackImei: !!r.track_imei,
     available: r.available ?? 0,
     salePrice: round2(num(r.sale_price)),
-    gstRate: num(r.gst_rate, 18),
+    gstRate: num(r.gst_rate, 0),
     avgCost: round2(num(r.avg_cost))
   }))
 }

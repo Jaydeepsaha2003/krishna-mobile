@@ -194,7 +194,7 @@ export function NewSalePage() {
           qty: 1,
           unitPrice: Number(unit.salePrice) || 0,
           discount: 0,
-          gstRate: Number(unit.gstRate) || 18,
+          gstRate: Number(unit.gstRate) || 0,
           costPrice: Number(unit.costPrice) || 0
         }
       ])
@@ -230,7 +230,7 @@ export function NewSalePage() {
             qty: 1,
             unitPrice: Number(m.salePrice) || 0,
             discount: 0,
-            gstRate: Number(m.gstRate) || 18,
+            gstRate: Number(m.gstRate) || 0,
             costPrice: Number(m.avgCost) || 0,
             maxQty: cap
           }

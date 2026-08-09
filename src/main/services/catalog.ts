@@ -186,7 +186,7 @@ export async function saveModel(input: ModelInput) {
     upper(input.ram),
     upper(input.storage),
     upper(input.color),
-    num(input.gstRate, 18),
+    num(input.gstRate, 0),
     num(input.defaultCost),
     num(input.defaultPrice),
     num(input.mrp),

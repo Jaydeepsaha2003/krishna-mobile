@@ -645,11 +645,62 @@ CREATE TABLE IF NOT EXISTS service_catalog (
 CREATE INDEX IF NOT EXISTS ix_service_catalog_company ON service_catalog(company_id, kind);
 `
 
+const V5 = /* sql */ `
+-- ===========================================================================
+--  GST DEFAULTS TO 0
+-- ===========================================================================
+-- models.gst_rate was created with DEFAULT 18 in V1. The shop bills GST-free
+-- by default, so the column default is dropped to 0 and every model still
+-- sitting on the old 18 default is reset. A rate can still be set per model
+-- (and overridden per line at billing time).
+--
+-- SQLite cannot ALTER a column default, so the table is rebuilt. models is
+-- referenced by other tables, hence foreign_keys is suspended for the swap —
+-- the ids are preserved, so every reference stays valid.
+PRAGMA foreign_keys = OFF;
+
+CREATE TABLE models_v2 (
+  id              TEXT PRIMARY KEY,
+  company_id      TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  brand_id        TEXT NOT NULL REFERENCES brands(id),
+  name            TEXT NOT NULL,
+  sku             TEXT NOT NULL,
+  category        TEXT NOT NULL DEFAULT 'Smartphone',
+  hsn             TEXT,
+  ram             TEXT,
+  storage         TEXT,
+  color           TEXT,
+  gst_rate        REAL NOT NULL DEFAULT 0,
+  default_cost    REAL NOT NULL DEFAULT 0,
+  default_price   REAL NOT NULL DEFAULT 0,
+  mrp             REAL NOT NULL DEFAULT 0,
+  low_stock_alert INTEGER NOT NULL DEFAULT 2,
+  track_imei      INTEGER NOT NULL DEFAULT 1,
+  warranty_months INTEGER NOT NULL DEFAULT 12,
+  is_active       INTEGER NOT NULL DEFAULT 1,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+INSERT INTO models_v2 SELECT id, company_id, brand_id, name, sku, category, hsn, ram, storage,
+  color, gst_rate, default_cost, default_price, mrp, low_stock_alert, track_imei, warranty_months,
+  is_active, created_at, updated_at FROM models;
+DROP TABLE models;
+ALTER TABLE models_v2 RENAME TO models;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_models_company_sku ON models(company_id, lower(sku));
+CREATE INDEX IF NOT EXISTS ix_models_brand ON models(brand_id);
+
+-- Clear the inherited 18% so existing products bill GST-free too.
+UPDATE models SET gst_rate = 0 WHERE gst_rate = 18;
+
+PRAGMA foreign_keys = ON;
+`
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'initial schema', sql: V1 },
   { version: 2, name: 'consumer EMI loans', sql: V2 },
   { version: 3, name: 'loans total_payable', sql: V3 },
-  { version: 4, name: 'service sales (recharge + repair)', sql: V4 }
+  { version: 4, name: 'service sales (recharge + repair)', sql: V4 },
+  { version: 5, name: 'GST defaults to 0', sql: V5 }
 ]
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version

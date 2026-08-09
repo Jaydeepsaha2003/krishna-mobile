@@ -117,9 +117,9 @@ export async function createSale(input: SaleInput) {
       throw new AppError('A goods line needs a product — pick one from stock.', 'VALIDATION')
     }
 
-    // Services default to 0% GST (a recharge / labour charge is not GST-rated
-    // goods); goods keep the model's rate, defaulting to 18%.
-    const gstRate = num(item.gstRate, isService ? 0 : num(unit?.gst_rate, 18))
+    // GST defaults to 0 everywhere; a rate is only applied when the model
+    // carries one (or the cashier types it on the line).
+    const gstRate = num(item.gstRate, isService ? 0 : num(unit?.gst_rate, 0))
     const lineTotal = round2(unitPrice * qty - lineDiscount)
     // Prices are GST inclusive, as printed on the box.
     const taxable = round2(lineTotal / (1 + gstRate / 100))

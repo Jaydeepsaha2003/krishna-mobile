@@ -95,7 +95,7 @@ export function NewPurchasePage() {
         qty: 1,
         unitCost: model.defaultCost ? String(model.defaultCost) : '',
         discount: '',
-        gstRate: String(model.gstRate ?? 18),
+        gstRate: String(model.gstRate ?? 0),
         units: [emptyUnit()]
       }
     ])
