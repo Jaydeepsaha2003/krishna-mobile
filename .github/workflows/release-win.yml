@@ -1,0 +1,46 @@
+name: Release (Windows)
+
+# Builds the Windows installer and publishes it to a GitHub Release entirely on
+# GitHub's servers — so releasing no longer depends on the shop's upload speed.
+# Runs when a v* tag is pushed, or manually from the Actions tab.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed for electron-builder to create the release
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The installer bundles .env so shops need no setup. It is gitignored, so
+      # CI recreates it from the ENV_FILE repository secret.
+      - name: Write bundled .env from secret
+        shell: bash
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          if [ -z "$ENV_FILE" ]; then
+            echo "::warning::ENV_FILE secret is empty — the installer will ship without Turso credentials."
+          fi
+          printf '%s' "$ENV_FILE" > .env
+
+      - name: Build & publish Windows installer
+        run: npm run publish:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
