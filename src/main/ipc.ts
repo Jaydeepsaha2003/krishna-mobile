@@ -92,8 +92,10 @@ const handlers: Record<string, Handler> = {
   /* ---------------------------------------------------------------- catalog */
   'brands:list': ({ includeInactive }: any = {}) => catalog.listBrands(includeInactive),
   'brands:save': (input: any) => catalog.saveBrand(input),
+  'brands:delete': ({ id }: any) => catalog.deleteBrand(id),
   'models:list': (params: any = {}) => catalog.listModels(params),
   'models:save': (input: any) => catalog.saveModel(input),
+  'models:delete': ({ id }: any) => catalog.deleteModel(id),
   'models:quickCreate': ({ brandName, modelName }: any) =>
     catalog.quickCreateModel(brandName, modelName),
 

@@ -58,6 +58,44 @@ export async function saveBrand(input: { id?: string; name: string; isActive?: b
   return { id }
 }
 
+/**
+ * Removes a brand. A brand that was never used (no models at all) is deleted
+ * outright; one that still has models is archived instead — hiding it from the
+ * lists while its models and their history stay valid. Deleting it for real
+ * would orphan every model that points at it.
+ */
+export async function deleteBrand(id: string) {
+  requirePermission('product.manage')
+  const { companyId } = requireCompany()
+
+  const brand = await one<{ name: string }>(
+    'SELECT name FROM brands WHERE id = ? AND company_id = ?',
+    [id, companyId]
+  )
+  if (!brand) throw new AppError('Brand not found.', 'NOT_FOUND')
+
+  const models = await one<{ n: number }>(
+    'SELECT COUNT(*) AS n FROM models WHERE brand_id = ?',
+    [id]
+  )
+  const modelCount = models?.n ?? 0
+
+  if (modelCount > 0) {
+    await run('UPDATE brands SET is_active = 0, updated_at = ? WHERE id = ?', [nowIso(), id])
+    await logAudit({
+      action: 'brand.archive',
+      entity: 'brand',
+      entityId: id,
+      summary: `${brand.name} hidden (${modelCount} model(s) keep their history)`
+    })
+    return { archived: true, name: brand.name, modelCount }
+  }
+
+  await run('DELETE FROM brands WHERE id = ?', [id])
+  await logAudit({ action: 'brand.delete', entity: 'brand', entityId: id, summary: brand.name })
+  return { archived: false, name: brand.name, modelCount: 0 }
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Models                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -218,6 +256,51 @@ export async function saveModel(input: ModelInput) {
   )
   await logAudit({ action: 'model.create', entity: 'model', entityId: id, summary: `${brand.name} ${name}` })
   return { id }
+}
+
+/**
+ * Removes a model. One that was never used — never purchased, stocked, sold,
+ * counted or adjusted — is deleted outright. A model with any history is
+ * archived instead (hidden from the catalogue and the pickers) so past bills,
+ * stock records and reports keep resolving.
+ */
+export async function deleteModel(id: string) {
+  requirePermission('product.manage')
+  const { companyId } = requireCompany()
+
+  const model = await one<{ name: string; brand_name: string }>(
+    `SELECT m.name, b.name AS brand_name FROM models m JOIN brands b ON b.id = m.brand_id
+      WHERE m.id = ? AND m.company_id = ?`,
+    [id, companyId]
+  )
+  if (!model) throw new AppError('Model not found.', 'NOT_FOUND')
+  const label = `${model.brand_name} ${model.name}`
+
+  // Every table that points at a model. Any hit means there is history to keep.
+  const used = await one<{ n: number }>(
+    `SELECT (SELECT COUNT(*) FROM stock_units WHERE model_id = :id)
+          + (SELECT COUNT(*) FROM purchase_items WHERE model_id = :id)
+          + (SELECT COUNT(*) FROM sale_items WHERE model_id = :id)
+          + (SELECT COUNT(*) FROM reconciliation_items WHERE model_id = :id)
+          + (SELECT COUNT(*) FROM stock_adjustments WHERE model_id = :id) AS n`,
+    { id }
+  )
+  const refs = used?.n ?? 0
+
+  if (refs > 0) {
+    await run('UPDATE models SET is_active = 0, updated_at = ? WHERE id = ?', [nowIso(), id])
+    await logAudit({
+      action: 'model.archive',
+      entity: 'model',
+      entityId: id,
+      summary: `${label} hidden (${refs} record(s) keep their history)`
+    })
+    return { archived: true, name: label, refs }
+  }
+
+  await run('DELETE FROM models WHERE id = ?', [id])
+  await logAudit({ action: 'model.delete', entity: 'model', entityId: id, summary: label })
+  return { archived: false, name: label, refs: 0 }
 }
 
 /** Used by the "quick add" flow inside the purchase / sale screens. */

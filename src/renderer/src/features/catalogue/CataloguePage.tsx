@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Download, Pencil, Plus, Search, Smartphone, Tag } from 'lucide-react'
+import { Download, Pencil, Plus, Search, Smartphone, Tag, Trash2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useBrands, useCsvExport, useDebounced, useScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
@@ -10,6 +10,7 @@ import { money } from '@/lib/utils'
 import { Badge, Button, Field, Input } from '@/components/ui/base'
 import { DataTable } from '@/components/ui/data-table'
 import {
+  ConfirmDialog,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -35,6 +36,8 @@ export function CataloguePage() {
   const [brandDialog, setBrandDialog] = React.useState(false)
   const [brandName, setBrandName] = React.useState('')
   const [editingBrand, setEditingBrand] = React.useState<any>(null)
+  const [deleteModelFor, setDeleteModelFor] = React.useState<any>(null)
+  const [deleteBrandFor, setDeleteBrandFor] = React.useState<any>(null)
 
   const debounced = useDebounced(search, 250)
   const searchRef = React.useRef<HTMLInputElement>(null)
@@ -71,6 +74,43 @@ export function CataloguePage() {
       setBrandName('')
       setEditingBrand(null)
       void brands.refetch()
+    } catch (err: any) {
+      toast.error(err.message)
+    }
+  }
+
+  const doDeleteModel = async () => {
+    try {
+      const res = await api.models.remove(deleteModelFor.id)
+      toast.success(
+        res.archived
+          ? `${res.name} hidden from the catalogue`
+          : `${res.name} deleted`,
+        {
+          description: res.archived
+            ? `It is used on ${res.refs} record(s), so its history is kept.`
+            : undefined
+        }
+      )
+      setDeleteModelFor(null)
+      void qc.invalidateQueries({ queryKey: ['models'] })
+      void brands.refetch()
+    } catch (err: any) {
+      toast.error(err.message)
+    }
+  }
+
+  const doDeleteBrand = async () => {
+    try {
+      const res = await api.brands.remove(deleteBrandFor.id)
+      toast.success(res.archived ? `${res.name} hidden` : `${res.name} deleted`, {
+        description: res.archived
+          ? `It still has ${res.modelCount} model(s), so they keep working.`
+          : undefined
+      })
+      setDeleteBrandFor(null)
+      void brands.refetch()
+      void qc.invalidateQueries({ queryKey: ['models'] })
     } catch (err: any) {
       toast.error(err.message)
     }
@@ -244,20 +284,31 @@ export function CataloguePage() {
               {
                 key: 'isActive',
                 header: '',
-                width: '60px',
+                width: '96px',
                 render: (m: any) =>
                   session.can('product.manage') ? (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setEditingModel(m)
-                        setModelDialog(true)
-                      }}
-                    >
-                      <Pencil />
-                    </Button>
+                    <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Edit model"
+                        onClick={() => {
+                          setEditingModel(m)
+                          setModelDialog(true)
+                        }}
+                      >
+                        <Pencil />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Delete model"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setDeleteModelFor(m)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
                   ) : null
               }
             ]}
@@ -276,20 +327,32 @@ export function CataloguePage() {
               {
                 key: 'actions',
                 header: '',
-                width: '60px',
+                width: '96px',
                 render: (b: any) =>
                   session.can('product.manage') ? (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        setEditingBrand(b)
-                        setBrandName(b.name)
-                        setBrandDialog(true)
-                      }}
-                    >
-                      <Pencil />
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Edit brand"
+                        onClick={() => {
+                          setEditingBrand(b)
+                          setBrandName(b.name)
+                          setBrandDialog(true)
+                        }}
+                      >
+                        <Pencil />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Delete brand"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setDeleteBrandFor(b)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
                   ) : null
               }
             ]}
@@ -330,6 +393,34 @@ export function CataloguePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteModelFor)}
+        onOpenChange={(v) => !v && setDeleteModelFor(null)}
+        title={`Delete ${deleteModelFor?.brandName} ${deleteModelFor?.name}?`}
+        description={
+          (deleteModelFor?.inStock ?? 0) > 0
+            ? `This model has ${deleteModelFor?.inStock} unit(s) in stock. It will be hidden from the catalogue and the billing screens, and its purchase, sale and stock history is kept intact.`
+            : 'If this model has never been purchased, stocked or sold it is removed completely. If it has any history, it is hidden instead so past bills and reports keep working.'
+        }
+        confirmLabel="Delete model"
+        destructive
+        onConfirm={doDeleteModel}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteBrandFor)}
+        onOpenChange={(v) => !v && setDeleteBrandFor(null)}
+        title={`Delete ${deleteBrandFor?.name}?`}
+        description={
+          (deleteBrandFor?.modelCount ?? 0) > 0
+            ? `This brand still has ${deleteBrandFor?.modelCount} model(s). It will be hidden from the lists, and those models keep working as they are.`
+            : 'This brand has no models, so it is removed completely.'
+        }
+        confirmLabel="Delete brand"
+        destructive
+        onConfirm={doDeleteBrand}
+      />
     </div>
   )
 }

@@ -78,11 +78,15 @@ export const api = {
   },
   brands: {
     list: (includeInactive = false) => call('brands:list', { includeInactive }),
-    save: (input: any) => call('brands:save', input)
+    save: (input: any) => call('brands:save', input),
+    remove: (id: string) =>
+      call<{ archived: boolean; name: string; modelCount: number }>('brands:delete', { id })
   },
   models: {
     list: (params: any = {}) => call('models:list', params),
     save: (input: any) => call('models:save', input),
+    remove: (id: string) =>
+      call<{ archived: boolean; name: string; refs: number }>('models:delete', { id }),
     quickCreate: (brandName: string, modelName: string) =>
       call('models:quickCreate', { brandName, modelName })
   },
