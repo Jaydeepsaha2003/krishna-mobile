@@ -1,15 +1,15 @@
 import * as React from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Minus, Plus, ScanLine } from 'lucide-react'
+import { Minus, PackagePlus, Plus, ScanLine, X } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useModels, useReconReasons, useScope } from '@/lib/hooks'
+import { useBrands, useModels, useReconReasons, useScope } from '@/lib/hooks'
 import { cn, money } from '@/lib/utils'
 import { CONDITIONS, STOCK_STATUS_LABELS } from '@shared/constants'
 import { imeiCheck, normalizeImei } from '@shared/validators'
 import { Button, Field, Input, Separator, Textarea } from '@/components/ui/base'
 import { Combobox, type ComboOption } from '@/components/ui/combobox'
-import { SimpleSelect } from '@/components/ui/form'
+import { SimpleSelect, Switch } from '@/components/ui/form'
 import {
   Dialog,
   DialogContent,
@@ -38,6 +38,15 @@ export function ManualStockDialog({
 
   const [search, setSearch] = React.useState('')
   const models = useModels(search)
+  const brands = useBrands()
+
+  /* Inline "new product" — so a product that isn't in the catalogue yet can be
+     created and stocked in one go, instead of visiting Brands & models first. */
+  const [creating, setCreating] = React.useState(false)
+  const [newBrandId, setNewBrandId] = React.useState('')
+  const [newModelName, setNewModelName] = React.useState('')
+  const [newTrackImei, setNewTrackImei] = React.useState(false)
+  const [creatingBusy, setCreatingBusy] = React.useState(false)
 
   const [targetShop, setTargetShop] = React.useState(shopId ?? '')
   const [model, setModel] = React.useState<any>(null)
@@ -65,6 +74,10 @@ export function ManualStockDialog({
     setToStatus('damaged')
     setReasonCode(mode === 'add' ? 'UNRECORDED_PURCHASE' : 'DAMAGE')
     setNote('')
+    setCreating(false)
+    setNewBrandId('')
+    setNewModelName('')
+    setNewTrackImei(false)
   }, [open, mode, shopId, shops])
 
   const tracksImei = Boolean(model?.trackImei)
@@ -88,6 +101,50 @@ export function ManualStockDialog({
   }
 
   const stepQty = (d: number) => setQty((q) => Math.max(1, Math.min(500, q + d)))
+
+  const addBrandInline = async (name: string) => {
+    try {
+      const res = await api.brands.save({ name })
+      await brands.refetch()
+      setNewBrandId(res.id)
+      toast.success(`Brand "${name.toUpperCase()}" added`)
+    } catch (err: any) {
+      toast.error(err.message)
+    }
+  }
+
+  /** Creates the product and selects it, without leaving this dialog. */
+  const createProduct = async () => {
+    if (!newBrandId) return toast.error('Choose or add a brand')
+    if (newModelName.trim().length < 1) return toast.error('Enter the product name')
+
+    setCreatingBusy(true)
+    try {
+      const res = await api.models.save({
+        brandId: newBrandId,
+        name: newModelName.trim(),
+        trackImei: newTrackImei,
+        defaultCost: Number(costPrice) || 0,
+        defaultPrice: Number(salePrice) || 0
+      })
+      const brandName = (brands.data ?? []).find((b: any) => b.id === newBrandId)?.name ?? ''
+      // Select it straight away so the user can carry on with quantity/price.
+      setModel({
+        id: res.id,
+        name: newModelName.trim().toUpperCase(),
+        brandName,
+        trackImei: newTrackImei
+      })
+      await models.refetch()
+      setCreating(false)
+      setNewModelName('')
+      toast.success(`${brandName} ${newModelName.trim().toUpperCase()} created`)
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setCreatingBusy(false)
+    }
+  }
 
   const submit = async () => {
     if (!targetShop) return toast.error('Choose the shop')
@@ -176,10 +233,94 @@ export function ManualStockDialog({
                 loading={models.isFetching}
                 placeholder="Search a product"
                 searchPlaceholder="Brand, model or SKU…"
-                emptyText="No product matches"
+                emptyText="Not in the catalogue yet — create it below"
+                onCreate={
+                  mode === 'add'
+                    ? (text) => {
+                        setNewModelName(text ?? '')
+                        setCreating(true)
+                      }
+                    : undefined
+                }
+                createLabel="Create new product"
               />
             </Field>
           </div>
+
+          {/* Create a product without leaving this dialog. */}
+          {mode === 'add' && !creating && !model && (
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-border py-2 text-[13px] text-muted-foreground transition-colors hover:border-ring/50 hover:bg-muted/40 hover:text-foreground"
+            >
+              <PackagePlus className="size-4" /> Product not in the list? Create it here
+            </button>
+          )}
+
+          {mode === 'add' && creating && (
+            <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-3">
+              <div className="flex items-center justify-between">
+                <p className="flex items-center gap-2 text-[13px] font-semibold text-primary">
+                  <PackagePlus className="size-4" /> New product
+                </p>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Close"
+                  onClick={() => setCreating(false)}
+                >
+                  <X />
+                </Button>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Brand" required hint="Type a new name to add it">
+                  <Combobox
+                    value={newBrandId}
+                    onChange={setNewBrandId}
+                    options={(brands.data ?? []).map((b: any) => ({
+                      value: b.id,
+                      label: b.name,
+                      meta: `${b.modelCount} models`
+                    }))}
+                    placeholder="Choose brand"
+                    searchPlaceholder="Type a brand…"
+                    onCreate={addBrandInline}
+                    createLabel="Add brand"
+                  />
+                </Field>
+                <Field label="Product name" required>
+                  <Input
+                    value={newModelName}
+                    onChange={(e) => setNewModelName(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && void createProduct()}
+                    placeholder="e.g. TYPE-C CHARGER 25W"
+                    className="uppercase"
+                  />
+                </Field>
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border border-border bg-background p-2.5">
+                <div>
+                  <p className="text-[13px] font-medium">Track each unit by IMEI</p>
+                  <p className="text-xs text-muted-foreground">
+                    On for phones. Leave off for accessories counted by quantity.
+                  </p>
+                </div>
+                <Switch checked={newTrackImei} onCheckedChange={setNewTrackImei} />
+              </div>
+
+              <Button
+                className="w-full"
+                onClick={() => void createProduct()}
+                loading={creatingBusy}
+                disabled={!newBrandId || newModelName.trim().length < 1}
+              >
+                Create &amp; use this product
+              </Button>
+            </div>
+          )}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Quantity" required>

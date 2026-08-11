@@ -229,7 +229,8 @@ export async function saveModel(input: ModelInput) {
     num(input.defaultPrice),
     num(input.mrp),
     Math.max(0, num(input.lowStockAlert, 2)),
-    input.trackImei === false ? 0 : 1,
+    // IMEI tracking is opt-in — most items are handled by quantity.
+    input.trackImei === true ? 1 : 0,
     num(input.warrantyMonths, 12),
     input.isActive === false ? 0 : 1,
     ts
