@@ -223,7 +223,7 @@ export async function stockSummary(shopId?: string) {
   const { companyId } = requireCompany()
   const rows = await all<any>(
     `SELECT m.id AS model_id, m.name AS model_name, m.sku, m.low_stock_alert, m.default_price,
-            b.name AS brand_name,
+            m.brand_id, b.name AS brand_name,
             COUNT(su.id)                    AS qty,
             COALESCE(SUM(su.cost_price), 0) AS stock_value,
             MIN(su.added_at)                AS oldest_at
@@ -240,6 +240,7 @@ export async function stockSummary(shopId?: string) {
   return rows.map((r) => ({
     modelId: r.model_id,
     modelName: r.model_name,
+    brandId: r.brand_id,
     brandName: r.brand_name,
     sku: r.sku,
     qty: r.qty ?? 0,

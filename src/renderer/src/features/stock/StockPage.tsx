@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeftRight, Boxes, Download, Minus, PackageSearch, Plus, Search, Wrench } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Boxes, Download, Minus, PackageSearch, Plus, Search, Wrench, X } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useBrands, useCsvExport, useDebounced, useReconReasons, useScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
@@ -92,6 +92,20 @@ export function StockPage() {
   const inStockTotal = (summary.data ?? []).reduce((a: number, s: any) => a + (s.qty || 0), 0)
   const inStockValue = (summary.data ?? []).reduce((a: number, s: any) => a + Number(s.stockValue || 0), 0)
   const lowCount = (summary.data ?? []).filter((s: any) => s.isLow).length
+
+  // The grouped roll-up is fetched per shop only, so the search box and brand
+  // filter are applied here. Without this the "By model" tab — which is the
+  // default view — ignored whatever was typed in the search box.
+  const summaryRows = React.useMemo(() => {
+    const q = debounced.trim().toLowerCase()
+    return (summary.data ?? []).filter((s: any) => {
+      if (brandId !== 'all' && s.brandId !== brandId) return false
+      if (!q) return true
+      return [s.modelName, s.brandName, s.sku]
+        .filter(Boolean)
+        .some((v: string) => String(v).toLowerCase().includes(q))
+    })
+  }, [summary.data, debounced, brandId])
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -198,10 +212,23 @@ export function StockPage() {
           ref={searchRef}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="IMEI, model, SKU…"
+          placeholder="Product name, SKU or IMEI…"
           prefixNode={<Search />}
-          suffixNode={<span className="kbd">Ctrl F</span>}
-          className="w-80 font-mono"
+          suffixNode={
+            search ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearch('')}
+                className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : (
+              <span className="kbd">Ctrl F</span>
+            )
+          }
+          className="w-80"
         />
         {shops.length > 1 && (
           <SimpleSelect
@@ -233,6 +260,12 @@ export function StockPage() {
           className="w-40"
         />
         <div className="flex-1" />
+        {(debounced || brandId !== 'all') && (
+          <Badge variant="secondary">
+            {tab === 'models' ? summaryRows.length : rows.length} match
+            {(tab === 'models' ? summaryRows.length : rows.length) === 1 ? '' : 'es'}
+          </Badge>
+        )}
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="models">By model</TabsTrigger>
@@ -335,10 +368,12 @@ export function StockPage() {
 
         <TabsContent value="models" className="mt-0">
           <DataTable
-            rows={summary.data ?? []}
+            rows={summaryRows}
             rowKey={(r: any) => r.modelId}
             loading={summary.isLoading}
-            empty="No models yet"
+            empty={
+              debounced || brandId !== 'all' ? 'No products match this search' : 'No models yet'
+            }
             maxHeight="calc(100vh - 420px)"
             showFooter
             columns={[
