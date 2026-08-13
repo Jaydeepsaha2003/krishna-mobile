@@ -40,7 +40,96 @@ jobs:
           fi
           printf '%s' "$ENV_FILE" > .env
 
+      # Retried once: electron-builder downloads NSIS tooling from the network
+      # and a transient ECONNRESET has failed a build before. A duplicate
+      # release left behind by a failed first attempt is cleaned up by the
+      # consolidation step below.
       - name: Build & publish Windows installer
-        run: npm run publish:win
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in 1 2; do
+            if npm run publish:win; then exit 0; fi
+            echo "::warning::publish attempt $attempt failed — retrying in 20s"
+            sleep 20
+          done
+          echo "::error::publish failed after 2 attempts"
+          exit 1
+
+      # electron-builder races its parallel uploads and regularly creates TWO
+      # releases for the same tag (one holding the .exe + latest.yml, one
+      # holding only the .blockmap). Auto-update then serves a release with no
+      # blockmap, so delta updates silently stop working. This step merges every
+      # release for the tag into the one holding latest.yml, deletes the
+      # leftovers, and fails loudly if any of the three assets is missing.
+      - name: Consolidate release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$(node -p "require('./package.json').version")"
+          fi
+          echo "Consolidating releases for $TAG"
+
+          list_ids() {
+            gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+              --jq ".[] | select(.tag_name==\"$TAG\") | .id"
+          }
+
+          ids=$(list_ids)
+          count=$(echo "$ids" | grep -c . || true)
+          echo "found $count release(s): $ids"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no release found for $TAG"
+            exit 1
+          fi
+
+          # Primary = the release that holds latest.yml (the auto-update feed).
+          primary=""
+          for id in $ids; do
+            if gh api "repos/$GITHUB_REPOSITORY/releases/$id" \
+                 --jq '.assets[].name' | grep -qx 'latest.yml'; then
+              primary="$id"; break
+            fi
+          done
+          if [ -z "$primary" ]; then primary=$(echo "$ids" | head -1); fi
+          echo "primary release: $primary"
+
+          for id in $ids; do
+            [ "$id" = "$primary" ] && continue
+            echo "merging release $id into $primary"
+            existing=$(gh api "repos/$GITHUB_REPOSITORY/releases/$primary" --jq '.assets[].name')
+            gh api "repos/$GITHUB_REPOSITORY/releases/$id" \
+              --jq '.assets[] | "\(.id) \(.name)"' | while read -r aid aname; do
+              if echo "$existing" | grep -qx "$aname"; then
+                echo "  $aname already on primary — skipping"
+                continue
+              fi
+              echo "  moving $aname"
+              gh api -H "Accept: application/octet-stream" \
+                "repos/$GITHUB_REPOSITORY/releases/assets/$aid" > "/tmp/$aname"
+              curl -sf -X POST \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary @"/tmp/$aname" \
+                "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$primary/assets?name=$aname" \
+                > /dev/null
+            done
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+            echo "  deleted duplicate release $id"
+          done
+
+          echo "final assets:"
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/$primary" --jq '.assets[].name')
+          echo "$assets"
+          for need in "latest.yml" ".exe" ".blockmap"; do
+            if ! echo "$assets" | grep -q "$need"; then
+              echo "::error::release is missing an asset matching '$need'"
+              exit 1
+            fi
+          done
+          echo "release for $TAG is complete"
