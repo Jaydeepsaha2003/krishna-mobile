@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { AlertTriangle, ArrowLeftRight, Boxes, Download, Minus, PackageSearch, Plus, Search, Wrench, X } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useBrands, useCsvExport, useDebounced, useReconReasons, useScope } from '@/lib/hooks'
+import { useBrands, useCsvExport, useDebounced, useReconReasons, useScope, useShopScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { useHotkey } from '@/lib/hotkeys'
 import { formatDate, money } from '@/lib/utils'
@@ -36,7 +36,10 @@ export function StockPage() {
 
   const [tab, setTab] = React.useState('models')
   const [search, setSearch] = React.useState(params.get('q') ?? '')
-  const [scope, setScope] = React.useState(shopId ?? 'all')
+  // Stock opens on every shop the user can see — an owner checking "what do we
+  // have?" wants the whole picture, and the list shows which shop each unit is
+  // at. For a single-shop user "all" is simply their shop.
+  const [scope, setScope] = useShopScope('all')
   const [status, setStatus] = React.useState('in_stock')
   const [brandId, setBrandId] = React.useState('all')
   const [selected, setSelected] = React.useState<string[]>([])
@@ -147,20 +150,21 @@ export function StockPage() {
                 <ArrowLeftRight /> Transfer stock
               </Button>
             )}
+            {/* Removing stock is admin-only; adding it is part of a manager's job. */}
+            {session.can('record.delete') && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:bg-destructive/10"
+                onClick={() => setManualMode('remove')}
+              >
+                <Minus /> Remove stock
+              </Button>
+            )}
             {session.can('stock.adjust') && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive hover:bg-destructive/10"
-                  onClick={() => setManualMode('remove')}
-                >
-                  <Minus /> Remove stock
-                </Button>
-                <Button size="sm" onClick={() => setManualMode('add')}>
-                  <Plus /> Add stock
-                </Button>
-              </>
+              <Button size="sm" onClick={() => setManualMode('add')}>
+                <Plus /> Add stock
+              </Button>
             )}
             <Button
               variant="outline"
@@ -348,7 +352,9 @@ export function StockPage() {
                 header: '',
                 width: '60px',
                 render: (r: any) =>
-                  session.can('stock.adjust') && r.status !== 'sold' ? (
+                  // Marking a unit damaged/lost takes it off the shelf, so it
+                  // follows the same admin-only rule as removing stock.
+                  session.can('record.delete') && r.status !== 'sold' ? (
                     <Button
                       variant="ghost"
                       size="icon-sm"

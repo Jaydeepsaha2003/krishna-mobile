@@ -88,7 +88,11 @@ export const PERMISSIONS = {
   'transfer.manage': 'Create / receive stock transfers',
   'payment.manage': 'Record payments & credit receipts',
   'stock.view': 'View stock',
-  'stock.adjust': 'Adjust stock (damage / loss / return)',
+  'stock.adjust': 'Add stock by hand (opening stock / cash buy)',
+  // Deliberately NOT granted to any role below admin: removing stock or
+  // deleting a bill/product destroys records, so it stays with the owner.
+  // Managers can still record, correct and cancel — just not delete.
+  'record.delete': 'Delete bills & products, and remove stock',
   'reconciliation.view': 'View reconciliations',
   'reconciliation.manage': 'Run & finalise reconciliations',
   'loan.view': 'View EMI loans',

@@ -777,7 +777,7 @@ export async function cancelSale(saleId: string, reason: string) {
  * deletion itself is always traceable even though the bill row is gone.
  */
 export async function deleteSale(saleId: string, reason?: string) {
-  requirePermission('sale.manage')
+  requirePermission('record.delete')
   const { companyId } = requireCompany()
   const sale = await one<any>('SELECT * FROM sales WHERE id = ? AND company_id = ?', [
     saleId,

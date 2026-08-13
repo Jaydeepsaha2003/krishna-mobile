@@ -197,8 +197,11 @@ export async function availableModels(
        JOIN brands b ON b.id = m.brand_id
        JOIN stock_units su
               ON su.model_id = m.id AND su.status = 'in_stock' AND su.current_shop_id = ?
-      WHERE m.company_id = ? AND m.is_active = 1 ${includeImei ? '' : 'AND m.track_imei = 0'} ${extra}
+      WHERE m.company_id = ? ${includeImei ? '' : 'AND m.track_imei = 0'} ${extra}
       GROUP BY m.id
+      -- No is_active filter: HAVING already limits this to models that hold
+      -- stock, and stock on the shelf must stay sellable even if the product
+      -- was archived — otherwise those units are stranded for good.
       HAVING available > 0
       ORDER BY b.name, m.name
       LIMIT ?`,
@@ -232,8 +235,12 @@ export async function stockSummary(shopId?: string) {
        LEFT JOIN stock_units su
               ON su.model_id = m.id AND su.status = 'in_stock'
              AND (? = '' OR su.current_shop_id = ?)
-      WHERE m.company_id = ? AND m.is_active = 1
+      WHERE m.company_id = ?
       GROUP BY m.id
+      -- Archived products drop out of the catalogue, but only once their stock
+      -- is gone: units physically on the shelf must still be counted, or the
+      -- shop's stock total silently under-reports.
+      HAVING m.is_active = 1 OR COUNT(su.id) > 0
       ORDER BY qty DESC, b.name, m.name`,
     [shopId ?? '', shopId ?? '', companyId]
   )
@@ -619,7 +626,7 @@ export async function getPurchase(id: string) {
  * row is deleted, cascading its items and payments.
  */
 export async function deletePurchase(purchaseId: string, reason?: string) {
-  requirePermission('purchase.manage')
+  requirePermission('record.delete')
   const { companyId } = requireCompany()
   const purchase = await one<any>('SELECT * FROM purchases WHERE id = ? AND company_id = ?', [
     purchaseId,
@@ -1143,7 +1150,9 @@ export async function removeManualStock(input: {
   reasonCode: string
   note?: string
 }) {
-  requirePermission('stock.adjust')
+  // Removing stock destroys inventory, so it is admin-only. Managers can still
+  // add stock and record sales — see the record.delete permission.
+  requirePermission('record.delete')
   const { companyId } = requireCompany()
   const session = requireSession()
 
@@ -1226,7 +1235,9 @@ export async function adjustStock(input: {
   reasonNote?: string
   reconciliationId?: string
 }) {
-  requirePermission('stock.adjust')
+  // Same reasoning as removeManualStock: taking a unit off the shelf is a
+  // deletion. Gating only the bulk path would leave this as a way around it.
+  requirePermission('record.delete')
   const { companyId } = requireCompany()
   const session = requireSession()
 

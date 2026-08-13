@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Ban, Download, HandCoins, Plus, Search, TriangleAlert, Wallet } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useCsvExport, useDateRange, useDebounced, useScope } from '@/lib/hooks'
+import { useCsvExport, useDateRange, useDebounced, useScope, useShopScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { useHotkey } from '@/lib/hotkeys'
 import { formatDate, money } from '@/lib/utils'
@@ -23,7 +23,7 @@ export function LoansPage() {
   const exportCsv = useCsvExport()
 
   const [range, setRange] = useDateRange('loans')
-  const [scope, setScope] = React.useState(shopId ?? 'all')
+  const [scope, setScope] = useShopScope()
   const [status, setStatus] = React.useState('all')
   const [onlyOverdue, setOnlyOverdue] = React.useState(false)
   const [search, setSearch] = React.useState('')

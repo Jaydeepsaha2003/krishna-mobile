@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ClipboardCheck, ClipboardList, Play, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useDateRange, useScope } from '@/lib/hooks'
+import { useDateRange, useScope, useShopScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { useHotkey } from '@/lib/hotkeys'
 import { formatDate, money, startOfMonth, todayStr } from '@/lib/utils'
@@ -30,7 +30,7 @@ export function ReconciliationPage() {
   const { companyId, shopId, shops } = useScope()
 
   const [statusFilter, setStatusFilter] = React.useState('all')
-  const [scope, setScope] = React.useState(shopId ?? 'all')
+  const [scope, setScope] = useShopScope()
   const [wizardOpen, setWizardOpen] = React.useState(false)
   const [deleteFor, setDeleteFor] = React.useState<any>(null)
 

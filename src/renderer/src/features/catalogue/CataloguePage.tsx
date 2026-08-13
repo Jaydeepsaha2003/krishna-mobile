@@ -299,15 +299,17 @@ export function CataloguePage() {
                       >
                         <Pencil />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        title="Delete model"
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => setDeleteModelFor(m)}
-                      >
-                        <Trash2 />
-                      </Button>
+                      {session.can('record.delete') && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Delete model"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleteModelFor(m)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      )}
                     </div>
                   ) : null
               }
@@ -343,15 +345,17 @@ export function CataloguePage() {
                       >
                         <Pencil />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        title="Delete brand"
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => setDeleteBrandFor(b)}
-                      >
-                        <Trash2 />
-                      </Button>
+                      {session.can('record.delete') && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Delete brand"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleteBrandFor(b)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      )}
                     </div>
                   ) : null
               }

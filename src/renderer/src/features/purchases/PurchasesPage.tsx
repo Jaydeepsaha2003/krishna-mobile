@@ -245,7 +245,7 @@ export function PurchasesPage() {
                     <Wallet /> Pay
                   </Button>
                 )}
-                {session.can('purchase.manage') && (
+                {session.can('record.delete') && (
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -318,7 +318,7 @@ export function PurchasesPage() {
                 </Card>
               </div>
 
-              {session.can('purchase.manage') && (
+              {session.can('record.delete') && (
                 <DialogFooter>
                   <Button
                     variant="outline"

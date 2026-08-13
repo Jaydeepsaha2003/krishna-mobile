@@ -15,7 +15,7 @@ import {
   Wallet
 } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useCsvExport, useDateRange, useDebounced, useScope } from '@/lib/hooks'
+import { useCsvExport, useDateRange, useDebounced, useScope, useShopScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { useHotkey } from '@/lib/hotkeys'
 import { formatDate, money } from '@/lib/utils'
@@ -47,7 +47,7 @@ export function SalesPage() {
   const [search, setSearch] = React.useState('')
   const [status, setStatus] = React.useState('all')
   const [saleType, setSaleType] = React.useState('all')
-  const [scope, setScope] = React.useState<string>(shopId ?? 'all')
+  const [scope, setScope] = useShopScope()
   const [detailId, setDetailId] = React.useState<string | null>(params.get('id'))
   const [payFor, setPayFor] = React.useState<any>(null)
   const [cancelFor, setCancelFor] = React.useState<any>(null)
@@ -333,7 +333,7 @@ export function SalesPage() {
                     <Ban />
                   </Button>
                 )}
-                {session.can('sale.manage') && (
+                {session.can('record.delete') && (
                   <Button
                     variant="ghost"
                     size="icon-sm"

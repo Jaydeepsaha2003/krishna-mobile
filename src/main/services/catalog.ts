@@ -65,7 +65,7 @@ export async function saveBrand(input: { id?: string; name: string; isActive?: b
  * would orphan every model that points at it.
  */
 export async function deleteBrand(id: string) {
-  requirePermission('product.manage')
+  requirePermission('record.delete')
   const { companyId } = requireCompany()
 
   const brand = await one<{ name: string }>(
@@ -266,7 +266,7 @@ export async function saveModel(input: ModelInput) {
  * stock records and reports keep resolving.
  */
 export async function deleteModel(id: string) {
-  requirePermission('product.manage')
+  requirePermission('record.delete')
   const { companyId } = requireCompany()
 
   const model = await one<{ name: string; brand_name: string }>(

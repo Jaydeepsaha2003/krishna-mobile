@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ArrowLeftRight, Ban, Check, Inbox, PackageCheck, Send } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useDateRange, useScope } from '@/lib/hooks'
+import { useDateRange, useScope, useShopScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { formatDate, money } from '@/lib/utils'
 import { Badge, Button, Card, CardContent, Field, Textarea } from '@/components/ui/base'
@@ -30,7 +30,7 @@ export function TransfersPage() {
   const [range, setRange] = useDateRange('transfers')
   const [direction, setDirection] = React.useState<'all' | 'in' | 'out'>('all')
   const [status, setStatus] = React.useState('all')
-  const [scope, setScope] = React.useState(shopId ?? 'all')
+  const [scope, setScope] = useShopScope()
   const [detailId, setDetailId] = React.useState<string | null>(null)
   const [cancelFor, setCancelFor] = React.useState<any>(null)
   const [cancelReason, setCancelReason] = React.useState('')

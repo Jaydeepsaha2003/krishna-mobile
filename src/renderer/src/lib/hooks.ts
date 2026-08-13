@@ -26,6 +26,34 @@ export function useScope() {
   return { companyId, shopId, shops }
 }
 
+/**
+ * A page's shop filter, kept in step with the shop picked in the header.
+ *
+ * Pages used to seed this with plain `useState(shopId ?? 'all')`, which reads
+ * the active shop only once. Switching shops in the header then appeared to do
+ * nothing — the page kept listing whichever shop was active when it first
+ * mounted, so stock added at the other shop looked missing. The filter the user
+ * sets on the page itself is still respected; only an actual header change
+ * resets it.
+ *
+ * @param initial 'active' seeds with the current shop, 'all' shows every shop.
+ */
+export function useShopScope(initial: 'active' | 'all' = 'active') {
+  const shopId = useSession((s) => s.shopId)
+  const [scope, setScope] = React.useState<string>(
+    initial === 'all' ? 'all' : (shopId ?? 'all')
+  )
+
+  const previous = React.useRef(shopId)
+  React.useEffect(() => {
+    if (previous.current === shopId) return // first render, or unrelated update
+    previous.current = shopId
+    setScope(shopId ?? 'all')
+  }, [shopId])
+
+  return [scope, setScope] as const
+}
+
 /** Date range persisted per screen so filters survive navigation. */
 export function useDateRange(key: string, initial?: DateRange) {
   const storageKey = `km.range.${key}`
