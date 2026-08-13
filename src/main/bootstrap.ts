@@ -1,6 +1,7 @@
 import log from 'electron-log/main'
 import { connect, migrate, startAutoSync } from './db'
 import { seed } from './db/seed'
+import { salvageOfflineReplica } from './db/salvage'
 
 /**
  * Opens the database, applies migrations and seeds first-run data.
@@ -9,6 +10,9 @@ import { seed } from './db/seed'
  */
 export async function startDatabase(): Promise<{ ok: boolean; error?: string }> {
   try {
+    // Rescue anything stranded in the old offline-writes replica BEFORE the
+    // new read-replica opens, so the pulled copy already contains it.
+    await salvageOfflineReplica()
     await connect()
     const applied = await migrate()
     await seed()

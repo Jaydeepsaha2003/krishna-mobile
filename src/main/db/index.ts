@@ -55,26 +55,26 @@ export async function connect(): Promise<Client> {
   // Distinct files: a plain offline database and a Turso replica are not
   // interchangeable, and pointing the replica at a plain file fails hard.
   const offlineFile = join(dir, 'krishna-mobile.db')
-  // Local-first replica file. A NEW name (not the old `krishna-replica.db`) so
-  // the switch to offline-writes mode starts from a clean replica instead of
-  // trying to reuse a file created by the old write-through client.
-  const replicaFile = join(dir, 'krishna-replica-lf.db')
+  // Read-replica file. A NEW name again: the previous `krishna-replica-lf.db`
+  // was an offline-writes replica whose local history may have diverged from
+  // the primary — it cannot be reused, only salvaged (see db/salvage.ts).
+  const replicaFile = join(dir, 'krishna-replica-rw.db')
   const url = config.tursoUrl
   const token = config.tursoToken
 
   connectError = null
 
-  // Local-first: with `offline: true`, writes land in the local replica
-  // instantly (~0.5ms) instead of blocking on a round-trip to the Turso primary
-  // (~9s on a slow link, which froze the whole app). `sync()` — on connect, on
-  // the auto-sync interval, and on demand — pushes those local writes up and
-  // pulls other shops' changes down, so the two shops stay in step within the
-  // sync interval without any save ever waiting on the network.
+  // Reads local, writes forwarded to the primary. The earlier `offline: true`
+  // (local-first) mode broke with two shops writing concurrently: WAL-frame
+  // replication cannot merge diverged histories, so one PC's push was rejected
+  // forever (InvalidPushFrameConflict) and its changes were stranded locally.
+  // With write-forwarding every write serialises on the primary — divergence is
+  // impossible — while reads stay instant from the local copy. A write costs a
+  // network round-trip (~300ms) and needs the internet to be up.
   const embeddedOpts = {
     url: `file:${replicaFile}`,
     syncUrl: url,
     authToken: token || undefined,
-    offline: true,
     intMode: 'number' as const
   }
 
@@ -95,7 +95,7 @@ export async function connect(): Promise<Client> {
         client = createClient({ url, authToken: token || undefined, intMode: 'number' })
       }
     }
-    log.info(`[db] ${mode} (local-first) — ${url}`)
+    log.info(`[db] ${mode} (reads local, writes to primary) — ${url}`)
   } else if (url) {
     mode = 'remote'
     client = createClient({ url, authToken: token || undefined, intMode: 'number' })
@@ -146,10 +146,10 @@ export function startAutoSync(): void {
 }
 
 /**
- * Local-first writes only reach Turso (and the other shop) on the next sync.
- * After a write we schedule a single debounced background sync so the
- * durability / cross-shop window is a couple of seconds, not the full auto-sync
- * interval — without ever making the write itself wait on the network.
+ * Writes reach the primary immediately (write-forwarding), but the OTHER
+ * shop's changes only arrive on a pull. After a write we schedule one debounced
+ * background sync so both machines converge within a couple of seconds instead
+ * of the full auto-sync interval.
  */
 let pushTimer: NodeJS.Timeout | null = null
 export function schedulePush(delayMs = 2000): void {
