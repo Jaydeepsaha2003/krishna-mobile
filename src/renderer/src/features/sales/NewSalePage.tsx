@@ -26,7 +26,7 @@ import { useScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { useHotkey } from '@/lib/hotkeys'
 import { addDays, cn, money, todayStr } from '@/lib/utils'
-import { PAYMENT_MODES } from '@shared/constants'
+import { DEFAULT_RECHARGE_PROFIT, PAYMENT_MODES, SETTING_RECHARGE_PROFIT } from '@shared/constants'
 import { formatPhone, normalizeImei } from '@shared/validators'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, Separator, Textarea } from '@/components/ui/base'
 import { Combobox, type ComboOption } from '@/components/ui/combobox'
@@ -132,6 +132,9 @@ export function NewSalePage() {
   const [device, setDevice] = React.useState('')
   const [problem, setProblem] = React.useState('')
   const [labourAmount, setLabourAmount] = React.useState<number | ''>('')
+  // What the repair cost the shop (outside technician, a part bought from the
+  // market). Parts taken from stock carry their own cost already.
+  const [repairCost, setRepairCost] = React.useState<number | ''>('')
 
   const scanRef = React.useRef<HTMLInputElement>(null)
   const paidRef = React.useRef<HTMLInputElement>(null)
@@ -155,6 +158,15 @@ export function NewSalePage() {
     enabled: Boolean(shopId) && mode !== 'recharge'
   })
 
+  // The shop's earning per recharge, so the screen shows the same profit the
+  // bill will actually record.
+  const rechargeProfitQuery = useQuery({
+    queryKey: ['recharge-profit'],
+    queryFn: () => api.settings.get<number>(SETTING_RECHARGE_PROFIT, DEFAULT_RECHARGE_PROFIT),
+    enabled: mode === 'recharge'
+  })
+  const rechargeProfit = Math.max(0, Number(rechargeProfitQuery.data ?? DEFAULT_RECHARGE_PROFIT))
+
   const presets = useQuery({
     queryKey: ['svc-presets', companyId, mode],
     queryFn: () => api.services.list({ kind: mode === 'recharge' ? 'recharge' : 'repair' }),
@@ -169,7 +181,15 @@ export function NewSalePage() {
     mode === 'recharge' ? Number(rechargeAmount) || 0 : mode === 'repair' ? Number(labourAmount) || 0 : 0
   const itemsTotal = linesTotal + serviceCharge
   const total = Math.max(0, itemsTotal - billDiscount + otherCharges)
-  const costTotal = lines.reduce((a, l) => a + l.costPrice * (l.stockUnitId ? 1 : l.qty), 0)
+  const linesCost = lines.reduce((a, l) => a + l.costPrice * (l.stockUnitId ? 1 : l.qty), 0)
+  // A recharge only earns the commission, not the whole amount the customer
+  // hands over — mirror the same rule the backend applies when saving.
+  const costTotal =
+    mode === 'recharge'
+      ? linesCost + Math.max(0, serviceCharge - rechargeProfit)
+      : mode === 'repair'
+        ? linesCost + (Number(repairCost) || 0)
+        : linesCost
   const profit = total - costTotal
   const paid = paidAmount === '' ? total : Number(paidAmount)
   const due = Math.max(0, Math.round((total - paid) * 100) / 100)
@@ -293,6 +313,7 @@ export function NewSalePage() {
     setDevice('')
     setProblem('')
     setLabourAmount('')
+    setRepairCost('')
     scanRef.current?.focus()
   }
 
@@ -337,7 +358,7 @@ export function NewSalePage() {
         qty: 1,
         unitPrice: Number(labourAmount) || 0,
         gstRate: 0,
-        costPrice: 0
+        costPrice: Number(repairCost) || 0
       })
     }
     for (const l of lines) {
@@ -586,7 +607,7 @@ export function NewSalePage() {
                       placeholder="e.g. Redmi Note 12"
                     />
                   </Field>
-                  <Field label="Labour / service charge">
+                  <Field label="Labour / service charge" hint="What you charge the customer">
                     <Input
                       type="number"
                       min={0}
@@ -597,6 +618,19 @@ export function NewSalePage() {
                     />
                   </Field>
                 </div>
+                <Field
+                  label="Your cost for this repair ₹"
+                  hint="Paid to an outside technician, or a part bought from the market. Parts taken from stock are counted automatically."
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    value={repairCost}
+                    onChange={(e) => setRepairCost(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="0"
+                    className="text-right tnum"
+                  />
+                </Field>
                 <Field label="Problem / work done">
                   <Textarea
                     value={problem}
@@ -918,6 +952,14 @@ export function NewSalePage() {
                   <Row label={mode === 'repair' ? 'Parts' : 'Items total'} value={money(linesTotal)} />
                 )}
                 {mode === 'recharge' && <Row label="Recharge" value={money(serviceCharge)} />}
+                {/* Show what the job actually costs, so the margin is obvious
+                    at the counter rather than only in a later report. */}
+                {mode === 'repair' && costTotal > 0 && session.can('report.profit') && (
+                  <Row
+                    label="Your cost (parts + repair)"
+                    value={<span className="text-muted-foreground">{money(costTotal)}</span>}
+                  />
+                )}
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-muted-foreground">Bill discount</span>
                   <Input

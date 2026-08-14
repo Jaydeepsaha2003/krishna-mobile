@@ -260,6 +260,17 @@ export const LOAN_TENURE_PRESETS = [3, 6, 9, 12, 18, 24] as const
 /** Settings-table key holding the shop-wide default late-payment penalty. */
 export const SETTING_DEFAULT_PENALTY = 'loan.defaultPenaltyAmount'
 
+/**
+ * What the shop actually earns on a recharge, in rupees.
+ *
+ * A recharge is not a goods sale: the customer hands over (say) ₹500 and almost
+ * all of it goes to the operator — the shop keeps a small commission. Without
+ * this the whole ₹500 counted as profit and wildly overstated earnings, so the
+ * cost of a recharge line is recorded as (amount − commission).
+ */
+export const SETTING_RECHARGE_PROFIT = 'sale.rechargeProfit'
+export const DEFAULT_RECHARGE_PROFIT = 5
+
 /* -------------------------------------------------------------------------- */
 /*  Reconciliation — default shortage / excess reasons                         */
 /* -------------------------------------------------------------------------- */

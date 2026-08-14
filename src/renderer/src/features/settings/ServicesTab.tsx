@@ -4,7 +4,8 @@ import { toast } from 'sonner'
 import { Pencil, Plus, Trash2, Wrench, Zap } from 'lucide-react'
 import { api } from '@/lib/api'
 import { money } from '@/lib/utils'
-import { Badge, Button, Field, Input } from '@/components/ui/base'
+import { DEFAULT_RECHARGE_PROFIT, SETTING_RECHARGE_PROFIT } from '@shared/constants'
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Field, Input } from '@/components/ui/base'
 import { DataTable } from '@/components/ui/data-table'
 import { SimpleSelect } from '@/components/ui/form'
 import {
@@ -78,6 +79,8 @@ export function ServicesTab() {
 
   return (
     <div className="space-y-4">
+      <RechargeProfitCard />
+
       <div className="flex items-center justify-between">
         <p className="text-[13px] text-muted-foreground">
           Quick presets for the New Sale screen — common repairs and recharge amounts. They just
@@ -204,5 +207,72 @@ export function ServicesTab() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/**
+ * How much the shop keeps on a recharge. A recharge is not a goods sale — the
+ * customer's money mostly goes to the operator — so only this commission is
+ * counted as profit.
+ */
+function RechargeProfitCard() {
+  const qc = useQueryClient()
+  const [value, setValue] = React.useState<number | ''>('')
+  const [loading, setLoading] = React.useState(true)
+  const [saving, setSaving] = React.useState(false)
+
+  React.useEffect(() => {
+    void (async () => {
+      setValue(await api.settings.get<number>(SETTING_RECHARGE_PROFIT, DEFAULT_RECHARGE_PROFIT))
+      setLoading(false)
+    })()
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.settings.set(SETTING_RECHARGE_PROFIT, Math.max(0, Number(value) || 0))
+      toast.success('Recharge earning saved', {
+        description: 'Applies to recharges billed from now on.'
+      })
+      void qc.invalidateQueries({ queryKey: ['sales'] })
+      void qc.invalidateQueries({ queryKey: ['dash'] })
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <span className="flex size-7 items-center justify-center rounded-lg bg-info/12 text-info">
+            <Zap className="size-4" />
+          </span>
+          Recharge earning
+        </CardTitle>
+        <CardDescription>
+          What you keep on a recharge. On a {money(500)} recharge only this amount counts as
+          profit — the rest goes to the operator, so your reports stay honest.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-end gap-3">
+        <Field label="Your earning per recharge ₹" className="w-56">
+          <Input
+            type="number"
+            min={0}
+            value={value}
+            disabled={loading}
+            onChange={(e) => setValue(e.target.value === '' ? '' : Number(e.target.value))}
+            className="text-right tnum font-semibold"
+          />
+        </Field>
+        <Button onClick={() => void save()} loading={saving} disabled={loading}>
+          Save
+        </Button>
+      </CardContent>
+    </Card>
   )
 }

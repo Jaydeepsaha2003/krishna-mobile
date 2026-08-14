@@ -1,6 +1,7 @@
 import { all, one, run, scalar, tx } from '../db'
 import {
   AppError,
+  getSetting,
   newId,
   nextDocumentNumber,
   nowIso,
@@ -9,6 +10,7 @@ import {
   round2,
   today
 } from '../utils'
+import { DEFAULT_RECHARGE_PROFIT, SETTING_RECHARGE_PROFIT } from '../../shared/constants'
 import { requireCompany, requirePermission, requireSession } from './session'
 import { logAudit } from './audit'
 
@@ -166,6 +168,11 @@ export async function createSale(input: SaleInput) {
 
   const saleDate = input.saleDate || today()
   const saleType: SaleType = input.saleType ?? 'product'
+  // Read once per bill so every recharge line on it uses the same commission.
+  const rechargeProfit =
+    saleType === 'recharge'
+      ? Math.max(0, num(await getSetting<number>(SETTING_RECHARGE_PROFIT, DEFAULT_RECHARGE_PROFIT)))
+      : 0
   // Cost (and therefore profit) is resolved inside the transaction, because a
   // quantity line consumes real stock units whose landed cost we only know once
   // we pick them.
@@ -233,8 +240,13 @@ export async function createSale(input: SaleInput) {
           )
         cost = round2(avail.reduce((a, u) => a + num(u.cost_price), 0))
         consume = avail.map((u) => u.id)
+      } else if (saleType === 'recharge') {
+        // A recharge only earns the shop its commission — the rest of the money
+        // goes to the operator. Booking that as cost keeps profit honest;
+        // otherwise a ₹500 recharge would report ₹500 of profit.
+        cost = round2(Math.max(0, line.lineTotal - rechargeProfit))
       } else {
-        // Service line (labour / recharge) — no stock consumed.
+        // Other service lines (repair labour) — no stock consumed.
         cost = round2(num(line.item.costPrice))
       }
 

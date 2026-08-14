@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Minus, PackagePlus, Plus, ScanLine, X } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -60,6 +60,16 @@ export function ManualStockDialog({
   const [reasonCode, setReasonCode] = React.useState('')
   const [note, setNote] = React.useState('')
   const [saving, setSaving] = React.useState(false)
+
+  // Removing stock must offer whatever is actually ON THE SHELF at the chosen
+  // shop, including archived products. The catalogue list hides archived
+  // models, so stock belonging to one could never be picked here — making it
+  // impossible to remove. This list is driven by real stock instead.
+  const stocked = useQuery({
+    queryKey: ['removable-stock', targetShop, search],
+    queryFn: () => api.stock.availableModels(targetShop, search, 60, true),
+    enabled: open && mode === 'remove' && Boolean(targetShop)
+  })
 
   React.useEffect(() => {
     if (!open) return
@@ -190,15 +200,28 @@ export function ManualStockDialog({
     }
   }
 
-  const modelOptions: ComboOption[] = (models.data ?? []).map((m: any) => ({
-    value: m.id,
-    label: `${m.brandName} ${m.name}`,
-    hint: `${m.sku}${m.trackImei ? ' · IMEI tracked' : ''}`,
-    meta: `${m.inStock} in stock`,
-    group: m.brandName,
-    keywords: [m.sku],
-    data: m
-  }))
+  // Adding: the whole catalogue. Removing: only what this shop actually holds.
+  const modelOptions: ComboOption[] =
+    mode === 'remove'
+      ? (stocked.data ?? []).map((m: any) => ({
+          value: m.modelId,
+          label: `${m.brandName} ${m.modelName}`,
+          hint: `${m.sku}${m.trackImei ? ' · IMEI tracked' : ''}`,
+          meta: `${m.available} in stock`,
+          group: m.brandName,
+          keywords: [m.sku],
+          // Normalised to the shape pickModel/submit expect.
+          data: { id: m.modelId, name: m.modelName, brandName: m.brandName, trackImei: m.trackImei }
+        }))
+      : (models.data ?? []).map((m: any) => ({
+          value: m.id,
+          label: `${m.brandName} ${m.name}`,
+          hint: `${m.sku}${m.trackImei ? ' · IMEI tracked' : ''}`,
+          meta: `${m.inStock} in stock`,
+          group: m.brandName,
+          keywords: [m.sku],
+          data: m
+        }))
 
   const totalValue = (Number(costPrice) || 0) * qty
 
@@ -230,10 +253,14 @@ export function ManualStockDialog({
                 onChange={(_v, option) => option?.data && pickModel(option.data)}
                 options={modelOptions}
                 onSearchChange={setSearch}
-                loading={models.isFetching}
-                placeholder="Search a product"
+                loading={mode === 'remove' ? stocked.isFetching : models.isFetching}
+                placeholder={mode === 'remove' ? 'Search stock at this shop' : 'Search a product'}
                 searchPlaceholder="Brand, model or SKU…"
-                emptyText="Not in the catalogue yet — create it below"
+                emptyText={
+                  mode === 'remove'
+                    ? 'Nothing in stock at this shop matches'
+                    : 'Not in the catalogue yet — create it below'
+                }
                 onCreate={
                   mode === 'add'
                     ? (text) => {
