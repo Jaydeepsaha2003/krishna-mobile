@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import log from 'electron-log/main'
 import { dbStatus, sync } from './db'
 import { startDatabase } from './bootstrap'
+import { mergeBackupIntoPrimary } from './db/salvage'
 import { AppError, getSetting, setSetting, today } from './utils'
 import * as auth from './services/auth'
 import * as users from './services/users'
@@ -18,7 +19,7 @@ import * as servicesCatalog from './services/servicesCatalog'
 import * as reports from './services/reports'
 import * as notifications from './services/notifications'
 import * as audit from './services/audit'
-import { getSession, requireCompany } from './services/session'
+import { getSession, requireCompany, requirePermission } from './services/session'
 import {
   checkForUpdates,
   currentVersion,
@@ -45,6 +46,35 @@ const handlers: Record<string, Handler> = {
   }),
   'app:sync': () => sync(),
   'app:reconnect': () => startDatabase(),
+
+  /* ---------------------------------------------------- backup recovery */
+  'recovery:pickFile': async (_p, event) => {
+    requirePermission('record.delete')
+    const win = BrowserWindow.fromWebContents(event.sender)!
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Choose the database backup file',
+      defaultPath: app.getPath('userData'),
+      properties: ['openFile', 'showHiddenFiles'],
+      filters: [
+        { name: 'Database backup', extensions: ['db', 'db-wal', 'salvaged', '*'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    if (canceled || !filePaths.length) return { filePath: null }
+    return { filePath: filePaths[0] }
+  },
+  'recovery:run': async ({ filePath }: any) => {
+    requirePermission('record.delete')
+    const result = await mergeBackupIntoPrimary(filePath)
+    // Pull the recovered rows into this machine's read replica immediately.
+    await sync()
+    await audit.logAudit({
+      action: 'data.recover',
+      entity: 'database',
+      summary: `Recovered from backup: ${result.inserted} inserted, ${result.updated} updated, ${result.failed} failed`
+    })
+    return result
+  },
   'app:openLogs': () => shell.openPath(log.transports.file.getFile().path),
   'app:logError': (payload: any) => {
     log.error('[renderer]', payload?.message, payload?.stack ?? '', payload?.componentStack ?? '')

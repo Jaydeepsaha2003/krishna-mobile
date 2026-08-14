@@ -1130,7 +1130,93 @@ function AboutTab() {
           </Button>
         </CardContent>
       </Card>
+
+      <RecoverBackupCard />
     </div>
+  )
+}
+
+/**
+ * Recovers records from a database backup file that never reached the cloud —
+ * for a machine that was writing offline before v1.1.6. Additive only: rows the
+ * cloud already has are left alone, and the backup file itself is never changed.
+ */
+function RecoverBackupCard() {
+  const session = useSession()
+  const [busy, setBusy] = React.useState(false)
+  const [result, setResult] = React.useState<any>(null)
+
+  if (!session.can('record.delete')) return null
+
+  const run = async () => {
+    const picked = await api.app.pickBackupFile()
+    if (!picked?.filePath) return
+    setBusy(true)
+    setResult(null)
+    try {
+      const res = await api.app.recoverFromBackup(picked.filePath)
+      setResult(res)
+      const moved = res.inserted + res.updated
+      if (moved === 0 && res.failed === 0) {
+        toast.success('Nothing to recover — everything in that file is already saved online')
+      } else {
+        toast.success(`Recovered ${res.inserted} record(s) to the cloud`, {
+          description: res.failed > 0 ? `${res.failed} could not be copied — see below.` : undefined
+        })
+      }
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Database className="size-4" /> Recover data from a backup file
+        </CardTitle>
+        <CardDescription>
+          If this computer recorded sales or stock while it could not reach the internet, pick its
+          backup database file here and anything missing is uploaded to the cloud. Records already
+          saved online are left untouched, and the file you choose is never modified.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button onClick={() => void run()} loading={busy}>
+          <Database /> Choose backup file &amp; recover
+        </Button>
+
+        <p className="text-xs text-muted-foreground">
+          The file is usually in the data folder above, named{' '}
+          <span className="font-mono">krishna-replica-lf.db</span> or{' '}
+          <span className="font-mono">…salvaged-*</span>.
+        </p>
+
+        {result && (
+          <div className="space-y-1.5 rounded-lg border border-border bg-muted/30 p-3 text-[13px]">
+            <Row label="New records uploaded" value={String(result.inserted)} />
+            <Row label="Existing records updated" value={String(result.updated)} />
+            <Row
+              label="Could not be copied"
+              value={
+                <span className={result.failed > 0 ? 'text-destructive' : undefined}>
+                  {result.failed}
+                </span>
+              }
+            />
+            {result.details?.length > 0 && (
+              <ul className="mt-1 max-h-32 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
+                {result.details.slice(0, 20).map((d: string, i: number) => (
+                  <li key={i}>• {d}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

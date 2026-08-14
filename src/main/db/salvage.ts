@@ -190,6 +190,48 @@ async function retireFile(base: string): Promise<boolean> {
 /** Written once the merge has fully succeeded, so it is never repeated. */
 const markerOf = (base: string) => `${base}.salvage-done`
 
+/**
+ * Merges ANY SQLite backup of this app's database into the primary — the same
+ * row-by-row logic the automatic salvage uses. Powers the manual
+ * "Recover data from a backup file" action, for backups the automatic path
+ * cannot see (renamed .salvaged-* files, manual copies, old replicas). The
+ * picked file is read-only here: it is never modified, renamed or deleted.
+ */
+export async function mergeBackupIntoPrimary(filePath: string): Promise<SalvageResult> {
+  const result: SalvageResult = { attempted: true, inserted: 0, updated: 0, failed: 0, details: [] }
+  if (!existsSync(filePath)) throw new Error(`File not found: ${filePath}`)
+  if (!config.tursoUrl) throw new Error('TURSO_DATABASE_URL is not configured.')
+
+  log.info(`[salvage] manual recovery from ${filePath}`)
+  let local: Client | null = null
+  let remote: Client | null = null
+  try {
+    local = createClient({ url: `file:${filePath}`, intMode: 'number' })
+    remote = createClient({
+      url: config.tursoUrl,
+      authToken: config.tursoToken || undefined,
+      intMode: 'number'
+    })
+    await remote.execute('SELECT 1')
+    // Prove the picked file is actually one of ours before touching anything.
+    if (!(await tableExists(local, 'stock_units')) && !(await tableExists(local, 'sales'))) {
+      throw new Error('This file does not look like a Krishna Mobile database backup.')
+    }
+
+    for (const table of TABLES) await salvageTable(local, remote, table, result)
+    await salvageCounters(local, remote, result)
+
+    log.info(
+      `[salvage] manual recovery done — ${result.inserted} inserted, ${result.updated} updated, ${result.failed} failed`
+    )
+    for (const d of result.details.slice(0, 50)) log.info(`[salvage]   ${d}`)
+  } finally {
+    local?.close()
+    remote?.close()
+  }
+  return result
+}
+
 export async function salvageOfflineReplica(): Promise<SalvageResult> {
   const result: SalvageResult = { attempted: false, inserted: 0, updated: 0, failed: 0, details: [] }
 

@@ -35,6 +35,12 @@ export const api = {
     sync: () => call('app:sync'),
     reconnect: () => call<{ ok: boolean; error?: string }>('app:reconnect'),
     openLogs: () => call('app:openLogs'),
+    pickBackupFile: () => call<{ filePath: string | null }>('recovery:pickFile'),
+    recoverFromBackup: (filePath: string) =>
+      call<{ inserted: number; updated: number; failed: number; details: string[] }>(
+        'recovery:run',
+        { filePath }
+      ),
     openExternal: (url: string) => call('app:openExternal', { url })
   },
   window: {
