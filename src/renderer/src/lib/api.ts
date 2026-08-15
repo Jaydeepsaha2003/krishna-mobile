@@ -117,6 +117,10 @@ export const api = {
     adjust: (input: any) => call('stock:adjust', input),
     addManual: (input: any) => call('stock:addManual', input),
     removeManual: (input: any) => call('stock:removeManual', input),
+    editUnit: (input: any) => call('stock:editUnit', input),
+    editModel: (input: any) => call('stock:editModel', input),
+    lots: (input: any) => call('stock:lots', input),
+    editLot: (input: any) => call('stock:editLot', input),
     adjustments: (params: any = {}) => call('stock:adjustments', params)
   },
   purchases: {

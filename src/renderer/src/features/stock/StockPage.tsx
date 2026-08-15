@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeftRight, Boxes, Download, Minus, PackageSearch, Plus, Search, Wrench, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Boxes, Download, Layers, Minus, PackageSearch, Pencil, Plus, Search, Wrench, X } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useBrands, useCsvExport, useDebounced, useReconReasons, useScope, useShopScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
@@ -23,6 +23,9 @@ import { SimpleSelect, Tabs, TabsContent, TabsList, TabsTrigger } from '@/compon
 import { Money, PageHeader, StatCard, StockStatusBadge, Toolbar } from '@/components/ui/misc'
 import { TransferDialog } from '@/features/transfers/TransferDialog'
 import { ManualStockDialog } from './ManualStockDialog'
+import { EditStockUnitDialog } from './EditStockUnitDialog'
+import { EditModelStockDialog } from './EditModelStockDialog'
+import { StockLotsDialog } from './StockLotsDialog'
 import { NewTransferDialog } from '@/features/transfers/NewTransferDialog'
 
 export function StockPage() {
@@ -50,6 +53,9 @@ export function StockPage() {
   const [adjustStatus, setAdjustStatus] = React.useState('damaged')
   const [adjustReason, setAdjustReason] = React.useState('DAMAGE')
   const [adjustNote, setAdjustNote] = React.useState('')
+  const [editUnitFor, setEditUnitFor] = React.useState<any>(null)
+  const [editModelFor, setEditModelFor] = React.useState<any>(null)
+  const [lotsFor, setLotsFor] = React.useState<any>(null)
 
   const debounced = useDebounced(search, 250)
   const searchRef = React.useRef<HTMLInputElement>(null)
@@ -350,22 +356,36 @@ export function StockPage() {
               {
                 key: 'actions',
                 header: '',
-                width: '60px',
+                width: '90px',
                 render: (r: any) =>
-                  // Marking a unit damaged/lost takes it off the shelf, so it
-                  // follows the same admin-only rule as removing stock.
+                  // Marking a unit damaged/lost, or correcting its price, both
+                  // take it off/change the shelf value — same admin-only rule
+                  // as removing stock, and both are refused once sold.
                   session.can('record.delete') && r.status !== 'sold' ? (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title="Adjust this unit"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setAdjustFor(r)
-                      }}
-                    >
-                      <Wrench />
-                    </Button>
+                    <div className="flex items-center justify-end gap-0.5">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Edit price / colour / condition"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setEditUnitFor(r)
+                        }}
+                      >
+                        <Pencil />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Adjust this unit"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setAdjustFor(r)
+                        }}
+                      >
+                        <Wrench />
+                      </Button>
+                    </div>
                   ) : null
               }
             ]}
@@ -425,7 +445,42 @@ export function StockPage() {
                 sortable: true,
                 render: (r: any) =>
                   r.ageDays === null ? '—' : <span className="tnum">{r.ageDays}d</span>
-              }
+              },
+              ...(session.can('record.delete')
+                ? [
+                    {
+                      key: 'actions',
+                      header: '',
+                      width: '80px',
+                      render: (r: any) => (
+                        <div className="flex items-center justify-end gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            title="View stock lot-wise, edit a lot's rate"
+                            onClick={(e: React.MouseEvent) => {
+                              e.stopPropagation()
+                              setLotsFor(r)
+                            }}
+                          >
+                            <Layers />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            title="Correct quantity or price"
+                            onClick={(e: React.MouseEvent) => {
+                              e.stopPropagation()
+                              setEditModelFor(r)
+                            }}
+                          >
+                            <Pencil />
+                          </Button>
+                        </div>
+                      )
+                    }
+                  ]
+                : [])
             ]}
           />
         </TabsContent>
@@ -469,6 +524,20 @@ export function StockPage() {
         onOpenChange={(v) => !v && setManualMode(null)}
         mode={manualMode ?? 'add'}
         shopId={scope === 'all' ? shopId ?? undefined : scope}
+      />
+
+      <EditStockUnitDialog unit={editUnitFor} onOpenChange={(v) => !v && setEditUnitFor(null)} />
+
+      <EditModelStockDialog
+        model={editModelFor}
+        defaultShopId={scope === 'all' ? shopId ?? undefined : scope}
+        onOpenChange={(v) => !v && setEditModelFor(null)}
+      />
+
+      <StockLotsDialog
+        model={lotsFor}
+        defaultShopId={scope === 'all' ? shopId ?? undefined : scope}
+        onOpenChange={(v) => !v && setLotsFor(null)}
       />
 
       <NewTransferDialog open={newTransferOpen} onOpenChange={setNewTransferOpen} />

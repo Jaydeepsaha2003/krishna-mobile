@@ -148,6 +148,10 @@ const handlers: Record<string, Handler> = {
   'stock:adjust': (input: any) => inventory.adjustStock(input),
   'stock:addManual': (input: any) => inventory.addManualStock(input),
   'stock:removeManual': (input: any) => inventory.removeManualStock(input),
+  'stock:editUnit': (input: any) => inventory.updateStockUnit(input),
+  'stock:editModel': (input: any) => inventory.editModelStock(input),
+  'stock:lots': (input: any) => inventory.listStockLots(input),
+  'stock:editLot': (input: any) => inventory.updateStockLotRate(input),
   'stock:adjustments': (params: any = {}) => inventory.listAdjustments(params),
 
   'purchases:create': (input: any) => inventory.createPurchase(input),

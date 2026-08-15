@@ -226,7 +226,7 @@ export async function stockSummary(shopId?: string) {
   const { companyId } = requireCompany()
   const rows = await all<any>(
     `SELECT m.id AS model_id, m.name AS model_name, m.sku, m.low_stock_alert, m.default_price,
-            m.brand_id, b.name AS brand_name,
+            m.brand_id, b.name AS brand_name, m.track_imei,
             COUNT(su.id)                    AS qty,
             COALESCE(SUM(su.cost_price), 0) AS stock_value,
             MIN(su.added_at)                AS oldest_at
@@ -250,6 +250,7 @@ export async function stockSummary(shopId?: string) {
     brandId: r.brand_id,
     brandName: r.brand_name,
     sku: r.sku,
+    trackImei: !!r.track_imei,
     qty: r.qty ?? 0,
     stockValue: round2(num(r.stock_value)),
     lowStockAlert: r.low_stock_alert,
@@ -1222,6 +1223,303 @@ export async function removeManualStock(input: {
   })
 
   return { removed: qty, label }
+}
+
+/* ========================================================================== */
+/*  EDIT — correcting a data-entry mistake on stock already recorded          */
+/* ========================================================================== */
+
+/**
+ * Fixes the cost price / sale price / colour / condition of ONE tracked unit —
+ * a wrongly-typed IMEI handset's price, say. Restricted to units still on the
+ * shelf: a sold unit's sale already snapshotted its own cost_price into
+ * sale_items at the time of sale, so editing the stock_units row afterwards
+ * would silently disagree with the invoice instead of correcting it.
+ */
+export async function updateStockUnit(input: {
+  stockUnitId: string
+  costPrice?: number
+  salePrice?: number
+  color?: string
+  condition?: string
+}) {
+  // Cost price drives profit, so correcting it is as sensitive as deleting —
+  // same admin-only gate as removeManualStock / deletePurchase.
+  requirePermission('record.delete')
+  const { companyId } = requireCompany()
+
+  const unit = await one<any>(
+    `SELECT su.*, m.name AS model_name, b.name AS brand_name
+       FROM stock_units su JOIN models m ON m.id = su.model_id JOIN brands b ON b.id = m.brand_id
+      WHERE su.id = ? AND su.company_id = ?`,
+    [input.stockUnitId, companyId]
+  )
+  if (!unit) throw new AppError('Unit not found.', 'NOT_FOUND')
+  if (unit.status === 'sold')
+    throw new AppError(
+      'This unit is already sold — its price is locked into that invoice. Edit the bill instead.',
+      'BAD_STATUS'
+    )
+
+  const costPrice = input.costPrice === undefined ? unit.cost_price : round2(num(input.costPrice))
+  const salePrice = input.salePrice === undefined ? unit.sale_price : round2(num(input.salePrice))
+  if (costPrice < 0 || salePrice < 0) throw new AppError('Price cannot be negative.', 'VALIDATION')
+
+  const ts = nowIso()
+  await run(
+    `UPDATE stock_units SET cost_price = ?, sale_price = ?, color = ?, condition = ?, updated_at = ?
+      WHERE id = ?`,
+    [
+      costPrice,
+      salePrice,
+      input.color !== undefined ? nullify(input.color) : unit.color,
+      input.condition !== undefined ? nullify(input.condition) ?? 'New' : unit.condition,
+      ts,
+      input.stockUnitId
+    ]
+  )
+
+  await logAudit({
+    action: 'stock.editUnit',
+    entity: 'stock_unit',
+    entityId: input.stockUnitId,
+    summary: `${unit.brand_name} ${unit.model_name}${unit.imei1 ? ` (${unit.imei1})` : ''}: cost ₹${unit.cost_price}→₹${costPrice}, sell ₹${unit.sale_price}→₹${salePrice}`,
+    shopId: unit.current_shop_id
+  })
+
+  return { id: input.stockUnitId }
+}
+
+/**
+ * Groups a model's in-stock units at one shop into the "lots" they were added
+ * in — one row per purchase bill, or per manual-add call (which inserts every
+ * unit of that call with the same timestamp and cost price). Lets an admin
+ * see, and later correct, the rate a specific batch was entered at instead of
+ * only ever correcting the whole shelf at once.
+ */
+export async function listStockLots(input: { modelId: string; shopId: string }) {
+  requirePermission('stock.view')
+  const { companyId } = requireCompany()
+
+  const rows = await all<any>(
+    `SELECT su.purchase_id, su.added_at, su.cost_price, su.sale_price, COUNT(*) AS qty,
+            sp.name AS supplier_name, p.invoice_no
+       FROM stock_units su
+       LEFT JOIN suppliers sp ON sp.id = su.supplier_id
+       LEFT JOIN purchases p ON p.id = su.purchase_id
+      WHERE su.company_id = ? AND su.model_id = ? AND su.current_shop_id = ? AND su.status = 'in_stock'
+      GROUP BY COALESCE(su.purchase_id, su.added_at), su.cost_price, su.sale_price
+      ORDER BY su.added_at DESC`,
+    [companyId, input.modelId, input.shopId]
+  )
+
+  return rows.map((r) => ({
+    purchaseId: r.purchase_id as string | null,
+    addedAt: r.added_at as string,
+    costPrice: round2(num(r.cost_price)),
+    salePrice: round2(num(r.sale_price)),
+    qty: r.qty as number,
+    supplierName: r.supplier_name as string | null,
+    invoiceNo: r.invoice_no as string | null
+  }))
+}
+
+/**
+ * Corrects the rate for ONE lot — the units added together in a single
+ * purchase bill or manual-add call — without touching the rest of the shelf.
+ * Identified by purchaseId when the lot came from a purchase bill, otherwise
+ * by its exact added_at timestamp (every unit from one manual-add shares it).
+ */
+export async function updateStockLotRate(input: {
+  modelId: string
+  shopId: string
+  purchaseId?: string | null
+  addedAt?: string
+  costPrice?: number
+  salePrice?: number
+}) {
+  requirePermission('record.delete')
+  const { companyId } = requireCompany()
+
+  if (input.costPrice === undefined && input.salePrice === undefined)
+    throw new AppError('Enter a new cost or sale price.', 'VALIDATION')
+  if (!input.purchaseId && !input.addedAt) throw new AppError('Lot not identified.', 'VALIDATION')
+
+  const sets: string[] = []
+  const args: any[] = []
+  if (input.costPrice !== undefined) {
+    const cp = round2(num(input.costPrice))
+    if (cp < 0) throw new AppError('Cost price cannot be negative.', 'VALIDATION')
+    sets.push('cost_price = ?')
+    args.push(cp)
+  }
+  if (input.salePrice !== undefined) {
+    const sp = round2(num(input.salePrice))
+    if (sp < 0) throw new AppError('Sale price cannot be negative.', 'VALIDATION')
+    sets.push('sale_price = ?')
+    args.push(sp)
+  }
+  const ts = nowIso()
+  sets.push('updated_at = ?')
+  args.push(ts)
+
+  const lotFilter = input.purchaseId ? 'purchase_id = ?' : 'purchase_id IS NULL AND added_at = ?'
+  const lotArg = input.purchaseId ?? input.addedAt
+
+  const result = await run(
+    `UPDATE stock_units SET ${sets.join(', ')}
+      WHERE company_id = ? AND model_id = ? AND current_shop_id = ? AND status = 'in_stock' AND ${lotFilter}`,
+    [...args, companyId, input.modelId, input.shopId, lotArg]
+  )
+  const updated = Number(result.rowsAffected ?? 0)
+  if (updated === 0) throw new AppError('This lot is no longer in stock — nothing to correct.', 'NOT_FOUND')
+
+  const model = await one<any>(
+    `SELECT m.name, b.name AS brand_name FROM models m JOIN brands b ON b.id = m.brand_id WHERE m.id = ?`,
+    [input.modelId]
+  )
+  await logAudit({
+    action: 'stock.editLot',
+    entity: 'model',
+    entityId: input.modelId,
+    summary: `${model?.brand_name} ${model?.name}: rate corrected on ${updated} unit(s) from one lot`,
+    shopId: input.shopId
+  })
+
+  return { updated }
+}
+
+/**
+ * Corrects the quantity and/or rate for a whole model's shelf at one shop in a
+ * single action — e.g. "we actually have 8 chargers, not 10, and they cost
+ * ₹120 not ₹100". Delegates the quantity change to the same addManualStock /
+ * removeManualStock used elsewhere (so every safety check — IMEI requirements,
+ * stock availability, audit trail — applies identically) and only adds a bulk
+ * price correction on top for units already on the shelf.
+ */
+export async function editModelStock(input: {
+  modelId: string
+  shopId: string
+  targetQty?: number
+  costPrice?: number
+  salePrice?: number
+  condition?: string
+  reasonCode?: string
+  toStatus?: string
+  note?: string
+}) {
+  requirePermission('record.delete')
+  const { companyId } = requireCompany()
+
+  const model = await one<any>(
+    `SELECT m.*, b.name AS brand_name FROM models m JOIN brands b ON b.id = m.brand_id
+      WHERE m.id = ? AND m.company_id = ?`,
+    [input.modelId, companyId]
+  )
+  if (!model) throw new AppError('Product not found.', 'VALIDATION')
+
+  const currentQty =
+    (await scalar<number>(
+      `SELECT COUNT(*) FROM stock_units
+        WHERE model_id = ? AND current_shop_id = ? AND status = 'in_stock'`,
+      [input.modelId, input.shopId]
+    )) ?? 0
+
+  // Captured before any bulk price correction below, so a qty-increase that
+  // omits costPrice still inherits what this shelf was actually paying.
+  const priorAvgCost =
+    currentQty > 0
+      ? await scalar<number>(
+          `SELECT AVG(cost_price) FROM stock_units
+            WHERE model_id = ? AND current_shop_id = ? AND status = 'in_stock'`,
+          [input.modelId, input.shopId]
+        )
+      : null
+
+  const rateGiven = input.costPrice !== undefined || input.salePrice !== undefined
+  const label = `${model.brand_name} ${model.name}`
+  let priceUpdated = 0
+  let qtyDelta = 0
+
+  // Bulk-correct the rate on whatever is ALREADY on the shelf first — any
+  // units added below get their price from costPrice/salePrice directly.
+  if (rateGiven && currentQty > 0) {
+    const ts = nowIso()
+    const sets: string[] = []
+    const args: any[] = []
+    if (input.costPrice !== undefined) {
+      const cp = round2(num(input.costPrice))
+      if (cp < 0) throw new AppError('Cost price cannot be negative.', 'VALIDATION')
+      sets.push('cost_price = ?')
+      args.push(cp)
+    }
+    if (input.salePrice !== undefined) {
+      const sp = round2(num(input.salePrice))
+      if (sp < 0) throw new AppError('Sale price cannot be negative.', 'VALIDATION')
+      sets.push('sale_price = ?')
+      args.push(sp)
+    }
+    sets.push('updated_at = ?')
+    args.push(ts)
+    await run(
+      `UPDATE stock_units SET ${sets.join(', ')}
+        WHERE model_id = ? AND current_shop_id = ? AND status = 'in_stock'`,
+      [...args, input.modelId, input.shopId]
+    )
+    priceUpdated = currentQty
+  }
+
+  if (input.targetQty !== undefined) {
+    const target = Math.max(0, Math.floor(num(input.targetQty)))
+    qtyDelta = target - currentQty
+    if (qtyDelta > 0) {
+      if (model.track_imei)
+        throw new AppError(
+          `${label} tracks IMEI — use "Add stock" to add each unit with its own IMEI.`,
+          'VALIDATION'
+        )
+      const inferredCost = input.costPrice !== undefined ? num(input.costPrice) : priorAvgCost
+      if (inferredCost === null || inferredCost === undefined)
+        throw new AppError('Enter a cost price — there is no existing stock to infer it from.', 'VALIDATION')
+      await addManualStock({
+        shopId: input.shopId,
+        modelId: input.modelId,
+        qty: qtyDelta,
+        costPrice: round2(inferredCost),
+        salePrice: round2(num(input.salePrice, num(model.default_price))),
+        condition: input.condition,
+        reasonCode: input.reasonCode || 'UNRECORDED_PURCHASE',
+        note: input.note
+      })
+    } else if (qtyDelta < 0) {
+      if (!input.reasonCode)
+        throw new AppError('Choose a reason for reducing this stock.', 'VALIDATION')
+      await removeManualStock({
+        shopId: input.shopId,
+        modelId: input.modelId,
+        qty: -qtyDelta,
+        toStatus: input.toStatus,
+        reasonCode: input.reasonCode,
+        note: input.note
+      })
+    }
+  }
+
+  if (priceUpdated === 0 && qtyDelta === 0) {
+    throw new AppError('Nothing to change — enter a new quantity or price.', 'VALIDATION')
+  }
+
+  await logAudit({
+    action: 'stock.editModel',
+    entity: 'model',
+    entityId: input.modelId,
+    summary: `${label}: qty ${currentQty}→${currentQty + qtyDelta}${
+      rateGiven ? `, rate corrected on ${priceUpdated} unit(s)` : ''
+    }`,
+    shopId: input.shopId
+  })
+
+  return { label, previousQty: currentQty, newQty: currentQty + qtyDelta, priceCorrected: priceUpdated }
 }
 
 /* ========================================================================== */
