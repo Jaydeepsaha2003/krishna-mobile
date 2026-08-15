@@ -10,7 +10,7 @@ import {
   today
 } from '../utils'
 import { normalizeImei } from '../../shared/validators'
-import { requireCompany, requirePermission, requireSession } from './session'
+import { requireCompany, requirePermission, requireSession, visibleShopIds } from './session'
 import { logAudit } from './audit'
 
 /* ========================================================================== */
@@ -81,6 +81,14 @@ export async function listStock(filter: StockFilter) {
   if (filter.shopId) {
     where.push('su.current_shop_id = ?')
     args.push(filter.shopId)
+  } else {
+    // No specific shop asked for — restrict a non-admin's "All shops" view to
+    // the shops they're actually assigned to, instead of the whole company.
+    const ids = await visibleShopIds()
+    if (ids !== null) {
+      where.push(ids.length ? `su.current_shop_id IN (${ids.map(() => '?').join(',')})` : '1 = 0')
+      args.push(...ids)
+    }
   }
   if (filter.modelId) {
     where.push('su.model_id = ?')
@@ -224,6 +232,21 @@ export async function availableModels(
 export async function stockSummary(shopId?: string) {
   requirePermission('stock.view')
   const { companyId } = requireCompany()
+
+  // No specific shop asked for — restrict a non-admin's "All shops" view to
+  // the shops they're actually assigned to, instead of the whole company.
+  let shopRestriction = ''
+  const restrictionArgs: string[] = []
+  if (!shopId) {
+    const ids = await visibleShopIds()
+    if (ids !== null) {
+      shopRestriction = ids.length
+        ? `AND su.current_shop_id IN (${ids.map(() => '?').join(',')})`
+        : 'AND 1 = 0'
+      restrictionArgs.push(...ids)
+    }
+  }
+
   const rows = await all<any>(
     `SELECT m.id AS model_id, m.name AS model_name, m.sku, m.low_stock_alert, m.default_price,
             m.brand_id, b.name AS brand_name, m.track_imei,
@@ -234,7 +257,7 @@ export async function stockSummary(shopId?: string) {
        JOIN brands b ON b.id = m.brand_id
        LEFT JOIN stock_units su
               ON su.model_id = m.id AND su.status = 'in_stock'
-             AND (? = '' OR su.current_shop_id = ?)
+             AND (? = '' OR su.current_shop_id = ?) ${shopRestriction}
       WHERE m.company_id = ?
       GROUP BY m.id
       -- Archived products drop out of the catalogue, but only once their stock
@@ -242,7 +265,7 @@ export async function stockSummary(shopId?: string) {
       -- shop's stock total silently under-reports.
       HAVING m.is_active = 1 OR COUNT(su.id) > 0
       ORDER BY qty DESC, b.name, m.name`,
-    [shopId ?? '', shopId ?? '', companyId]
+    [shopId ?? '', shopId ?? '', ...restrictionArgs, companyId]
   )
   return rows.map((r) => ({
     modelId: r.model_id,

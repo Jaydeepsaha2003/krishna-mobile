@@ -1,5 +1,6 @@
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, type Permission, type Role } from '../../shared/constants'
 import { AppError } from '../utils'
+import { all } from '../db'
 
 export interface SessionUser {
   id: string
@@ -56,6 +57,22 @@ export function requireShop(): { session: ActiveSession; companyId: string; shop
 export function setActiveScope(companyId: string | null, shopId: string | null): void {
   if (!current) return
   current = { ...current, companyId, shopId }
+}
+
+/**
+ * The shop IDs a "no shop chosen" query should be restricted to — `null` means
+ * no restriction (an admin, who can see every shop). A non-admin's "All shops"
+ * view must stop at the shops they're actually assigned to in user_shops, or
+ * an "all shops I can see" request silently turns into "every shop in the
+ * company", leaking other shops' stock into a manager's aggregate view.
+ */
+export async function visibleShopIds(): Promise<string[] | null> {
+  const s = requireSession()
+  if (s.user.role === 'admin') return null
+  const rows = await all<{ shop_id: string }>('SELECT shop_id FROM user_shops WHERE user_id = ?', [
+    s.user.id
+  ])
+  return rows.map((r) => r.shop_id)
 }
 
 /** Resolves the effective permission list for a stored user row. */

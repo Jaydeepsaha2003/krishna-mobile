@@ -1,6 +1,6 @@
 import { all, one } from '../db'
 import { num, round2, today } from '../utils'
-import { requireCompany, requirePermission } from './session'
+import { requireCompany, requirePermission, visibleShopIds } from './session'
 
 function scope(shopId?: string) {
   return { shopFilter: shopId ? 'AND s.shop_id = :shop' : '', shop: shopId ?? '' }
@@ -422,6 +422,21 @@ export async function staffPerformance(params: { shopId?: string; from: string; 
 export async function ageingStock(params: { shopId?: string; minDays?: number }) {
   requirePermission('stock.view')
   const { companyId } = requireCompany()
+
+  // No specific shop asked for — restrict a non-admin's "All shops" view to
+  // the shops they're actually assigned to, instead of the whole company.
+  let shopRestriction = ''
+  let restrictionIds: string[] = []
+  if (!params.shopId) {
+    const ids = await visibleShopIds()
+    if (ids !== null) {
+      shopRestriction = ids.length
+        ? `AND su.current_shop_id IN (${ids.map(() => '?').join(',')})`
+        : 'AND 1 = 0'
+      restrictionIds = ids
+    }
+  }
+
   const rows = await all<any>(
     `SELECT su.id, su.imei1, su.cost_price, su.added_at, m.name AS model_name,
             b.name AS brand_name, sh.name AS shop_name,
@@ -430,10 +445,10 @@ export async function ageingStock(params: { shopId?: string; minDays?: number })
        JOIN models m ON m.id = su.model_id
        JOIN brands b ON b.id = m.brand_id
        LEFT JOIN shops sh ON sh.id = su.current_shop_id
-      WHERE su.company_id = :company AND su.status = 'in_stock'
-        ${params.shopId ? 'AND su.current_shop_id = :shop' : ''}
+      WHERE su.company_id = ? AND su.status = 'in_stock'
+        ${params.shopId ? 'AND su.current_shop_id = ?' : shopRestriction}
       ORDER BY su.added_at LIMIT 300`,
-    { company: companyId, shop: params.shopId ?? '' }
+    [companyId, ...(params.shopId ? [params.shopId] : restrictionIds)]
   )
   const min = params.minDays ?? 0
   return rows
