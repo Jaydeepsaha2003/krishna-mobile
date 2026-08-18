@@ -10,7 +10,7 @@ import {
   round2,
   today
 } from '../utils'
-import { DEFAULT_RECHARGE_PROFIT, SETTING_RECHARGE_PROFIT } from '../../shared/constants'
+import { DEFAULT_RECHARGE_COMMISSION_PCT, SETTING_RECHARGE_COMMISSION_PCT } from '../../shared/constants'
 import { requireCompany, requirePermission, requireSession } from './session'
 import { logAudit } from './audit'
 
@@ -168,10 +168,16 @@ export async function createSale(input: SaleInput) {
 
   const saleDate = input.saleDate || today()
   const saleType: SaleType = input.saleType ?? 'product'
-  // Read once per bill so every recharge line on it uses the same commission.
-  const rechargeProfit =
+  // Read once per bill so every recharge line on it uses the same commission %.
+  const rechargeCommissionPct =
     saleType === 'recharge'
-      ? Math.max(0, num(await getSetting<number>(SETTING_RECHARGE_PROFIT, DEFAULT_RECHARGE_PROFIT)))
+      ? Math.min(
+          100,
+          Math.max(
+            0,
+            num(await getSetting<number>(SETTING_RECHARGE_COMMISSION_PCT, DEFAULT_RECHARGE_COMMISSION_PCT))
+          )
+        )
       : 0
   // Cost (and therefore profit) is resolved inside the transaction, because a
   // quantity line consumes real stock units whose landed cost we only know once
@@ -241,10 +247,10 @@ export async function createSale(input: SaleInput) {
         cost = round2(avail.reduce((a, u) => a + num(u.cost_price), 0))
         consume = avail.map((u) => u.id)
       } else if (saleType === 'recharge') {
-        // A recharge only earns the shop its commission — the rest of the money
-        // goes to the operator. Booking that as cost keeps profit honest;
-        // otherwise a ₹500 recharge would report ₹500 of profit.
-        cost = round2(Math.max(0, line.lineTotal - rechargeProfit))
+        // A recharge only earns the shop its commission % — the rest of the
+        // money goes to the operator. Booking that as cost keeps profit
+        // honest; otherwise a ₹500 recharge would report ₹500 of profit.
+        cost = round2(line.lineTotal * (1 - rechargeCommissionPct / 100))
       } else {
         // Other service lines (repair labour) — no stock consumed.
         cost = round2(num(line.item.costPrice))

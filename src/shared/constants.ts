@@ -261,15 +261,18 @@ export const LOAN_TENURE_PRESETS = [3, 6, 9, 12, 18, 24] as const
 export const SETTING_DEFAULT_PENALTY = 'loan.defaultPenaltyAmount'
 
 /**
- * What the shop actually earns on a recharge, in rupees.
+ * What the shop actually earns on a recharge, as a % of the recharge amount.
  *
  * A recharge is not a goods sale: the customer hands over (say) ₹500 and almost
  * all of it goes to the operator — the shop keeps a small commission. Without
  * this the whole ₹500 counted as profit and wildly overstated earnings, so the
- * cost of a recharge line is recorded as (amount − commission).
+ * cost of a recharge line is recorded as amount × (1 − commission%).
+ *
+ * A percentage (rather than a flat rupee amount) tracks real operator payout
+ * structures, which are themselves a cut of the recharge value.
  */
-export const SETTING_RECHARGE_PROFIT = 'sale.rechargeProfit'
-export const DEFAULT_RECHARGE_PROFIT = 5
+export const SETTING_RECHARGE_COMMISSION_PCT = 'sale.rechargeCommissionPercent'
+export const DEFAULT_RECHARGE_COMMISSION_PCT = 2
 
 /* -------------------------------------------------------------------------- */
 /*  Reconciliation — default shortage / excess reasons                         */

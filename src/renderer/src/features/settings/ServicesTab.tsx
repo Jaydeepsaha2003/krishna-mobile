@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Pencil, Plus, Trash2, Wrench, Zap } from 'lucide-react'
 import { api } from '@/lib/api'
 import { money } from '@/lib/utils'
-import { DEFAULT_RECHARGE_PROFIT, SETTING_RECHARGE_PROFIT } from '@shared/constants'
+import { DEFAULT_RECHARGE_COMMISSION_PCT, SETTING_RECHARGE_COMMISSION_PCT } from '@shared/constants'
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Field, Input } from '@/components/ui/base'
 import { DataTable } from '@/components/ui/data-table'
 import { SimpleSelect } from '@/components/ui/form'
@@ -212,7 +212,7 @@ export function ServicesTab() {
 
 /**
  * How much the shop keeps on a recharge. A recharge is not a goods sale — the
- * customer's money mostly goes to the operator — so only this commission is
+ * customer's money mostly goes to the operator — so only this commission % is
  * counted as profit.
  */
 function RechargeProfitCard() {
@@ -223,7 +223,7 @@ function RechargeProfitCard() {
 
   React.useEffect(() => {
     void (async () => {
-      setValue(await api.settings.get<number>(SETTING_RECHARGE_PROFIT, DEFAULT_RECHARGE_PROFIT))
+      setValue(await api.settings.get<number>(SETTING_RECHARGE_COMMISSION_PCT, DEFAULT_RECHARGE_COMMISSION_PCT))
       setLoading(false)
     })()
   }, [])
@@ -231,8 +231,8 @@ function RechargeProfitCard() {
   const save = async () => {
     setSaving(true)
     try {
-      await api.settings.set(SETTING_RECHARGE_PROFIT, Math.max(0, Number(value) || 0))
-      toast.success('Recharge earning saved', {
+      await api.settings.set(SETTING_RECHARGE_COMMISSION_PCT, Math.min(100, Math.max(0, Number(value) || 0)))
+      toast.success('Recharge commission saved', {
         description: 'Applies to recharges billed from now on.'
       })
       void qc.invalidateQueries({ queryKey: ['sales'] })
@@ -244,6 +244,9 @@ function RechargeProfitCard() {
     }
   }
 
+  const pct = Number(value) || 0
+  const exampleAmount = 500
+
   return (
     <Card>
       <CardHeader>
@@ -251,28 +254,40 @@ function RechargeProfitCard() {
           <span className="flex size-7 items-center justify-center rounded-lg bg-info/12 text-info">
             <Zap className="size-4" />
           </span>
-          Recharge earning
+          Recharge commission
         </CardTitle>
         <CardDescription>
-          What you keep on a recharge. On a {money(500)} recharge only this amount counts as
-          profit — the rest goes to the operator, so your reports stay honest.
+          What you keep on a recharge, as a % of the amount. On a {money(exampleAmount)} recharge only
+          this share counts as profit — the rest goes to the operator, so your reports stay honest.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap items-end gap-3">
-        <Field label="Your earning per recharge ₹" className="w-56">
+        <Field label="Your commission %" className="w-40">
           <Input
             type="number"
             min={0}
+            max={100}
+            step={0.5}
             value={value}
             disabled={loading}
             onChange={(e) => setValue(e.target.value === '' ? '' : Number(e.target.value))}
             className="text-right tnum font-semibold"
+            suffixNode={<span className="text-xs text-muted-foreground">%</span>}
           />
         </Field>
         <Button onClick={() => void save()} loading={saving} disabled={loading}>
           Save
         </Button>
+        {!loading && (
+          <p className="w-full text-xs text-muted-foreground">
+            e.g. a {money(exampleAmount)} recharge earns you {money(round2((exampleAmount * pct) / 100))}
+          </p>
+        )}
       </CardContent>
     </Card>
   )
+}
+
+function round2(n: number) {
+  return Math.round((n + Number.EPSILON) * 100) / 100
 }

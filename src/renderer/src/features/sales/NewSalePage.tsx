@@ -26,7 +26,7 @@ import { useScope } from '@/lib/hooks'
 import { useSession } from '@/store/session'
 import { useHotkey } from '@/lib/hotkeys'
 import { addDays, cn, money, todayStr } from '@/lib/utils'
-import { DEFAULT_RECHARGE_PROFIT, PAYMENT_MODES, SETTING_RECHARGE_PROFIT } from '@shared/constants'
+import { DEFAULT_RECHARGE_COMMISSION_PCT, PAYMENT_MODES, SETTING_RECHARGE_COMMISSION_PCT } from '@shared/constants'
 import { formatPhone, normalizeImei } from '@shared/validators'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, Separator, Textarea } from '@/components/ui/base'
 import { Combobox, type ComboOption } from '@/components/ui/combobox'
@@ -158,14 +158,17 @@ export function NewSalePage() {
     enabled: Boolean(shopId) && mode !== 'recharge'
   })
 
-  // The shop's earning per recharge, so the screen shows the same profit the
+  // The shop's earning % per recharge, so the screen shows the same profit the
   // bill will actually record.
-  const rechargeProfitQuery = useQuery({
-    queryKey: ['recharge-profit'],
-    queryFn: () => api.settings.get<number>(SETTING_RECHARGE_PROFIT, DEFAULT_RECHARGE_PROFIT),
+  const rechargeCommissionQuery = useQuery({
+    queryKey: ['recharge-commission-pct'],
+    queryFn: () => api.settings.get<number>(SETTING_RECHARGE_COMMISSION_PCT, DEFAULT_RECHARGE_COMMISSION_PCT),
     enabled: mode === 'recharge'
   })
-  const rechargeProfit = Math.max(0, Number(rechargeProfitQuery.data ?? DEFAULT_RECHARGE_PROFIT))
+  const rechargeCommissionPct = Math.min(
+    100,
+    Math.max(0, Number(rechargeCommissionQuery.data ?? DEFAULT_RECHARGE_COMMISSION_PCT))
+  )
 
   const presets = useQuery({
     queryKey: ['svc-presets', companyId, mode],
@@ -186,7 +189,7 @@ export function NewSalePage() {
   // hands over — mirror the same rule the backend applies when saving.
   const costTotal =
     mode === 'recharge'
-      ? linesCost + Math.max(0, serviceCharge - rechargeProfit)
+      ? linesCost + serviceCharge * (1 - rechargeCommissionPct / 100)
       : mode === 'repair'
         ? linesCost + (Number(repairCost) || 0)
         : linesCost
