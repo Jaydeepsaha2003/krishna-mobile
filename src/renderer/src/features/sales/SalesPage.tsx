@@ -92,6 +92,7 @@ export function SalesPage() {
 
   const rows = sales.data?.rows ?? []
   const summary = sales.data?.summary
+  const byPaymentMode = sales.data?.byPaymentMode ?? []
 
   const doExport = async () => {
     await exportCsv(
@@ -185,6 +186,22 @@ export function SalesPage() {
           <StatCard label="Profit" value={money(summary?.profit)} icon={FileText} tone="info" />
         )}
       </div>
+
+      {byPaymentMode.length > 0 && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-2 p-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              By payment mode
+            </span>
+            {byPaymentMode.map((m: any) => (
+              <Badge key={m.mode} variant="secondary" className="gap-1.5 py-1">
+                <span>{m.mode}</span>
+                <span className="tnum font-semibold">{money(m.amount)}</span>
+              </Badge>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <Toolbar>
         <Input

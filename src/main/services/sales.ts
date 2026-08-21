@@ -461,7 +461,24 @@ export async function listSales(f: SaleFilter) {
     args
   )
 
-  return { rows: rows.map(shapeSale), summary }
+  // Same filters as the list/summary above, just grouped by how the customer
+  // paid — so "Cash ₹10,000, UPI ₹5,000 for today" always matches what's on
+  // screen instead of needing a separate report.
+  const byPaymentModeRows = await all<{ mode: string; count: number; amount: number }>(
+    `SELECT COALESCE(s.payment_mode, 'Not recorded') AS mode, COUNT(*) AS count,
+            COALESCE(SUM(s.total),0) AS amount
+       FROM sales s LEFT JOIN customers c ON c.id = s.customer_id ${clause}
+      GROUP BY COALESCE(s.payment_mode, 'Not recorded')
+      ORDER BY amount DESC`,
+    args
+  )
+  const byPaymentMode = byPaymentModeRows.map((r) => ({
+    mode: r.mode,
+    count: r.count,
+    amount: round2(num(r.amount))
+  }))
+
+  return { rows: rows.map(shapeSale), summary, byPaymentMode }
 }
 
 function shapeSale(r: any) {
